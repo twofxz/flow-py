@@ -50,11 +50,13 @@ flow generate \
   --resolution 1K
 ```
 
-### Generate 9:16 Vertical Reel / Story
+### Generate Image from Reference (Image-to-Image / Character Consistency)
 ```bash
 flow generate \
-  --prompt "Photoreal vertical street style portrait in Shibuya..." \
-  --ratio 9:16
+  --prompt "Photoreal cinematic action shot, the same character from reference playing tennis..." \
+  --reference-image "./assets/character.jpg" \
+  --filename "character_tennis.jpeg" \
+  --resolution 1K
 ```
 
 ---
