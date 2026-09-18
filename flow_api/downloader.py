@@ -102,3 +102,50 @@ class FlowDownloader:
             time.sleep(1)
             
         return downloaded_paths
+
+    def download_video(self, resolution: str = "720p", filename: Optional[str] = None, timeout: int = 15) -> Optional[str]:
+        """Baixa o vídeo ativo no visualizador no formato nativo MP4."""
+        self.open_viewer()
+        dl_btn = self.page.locator("button[aria-label='Baixar mídia']").first
+        if not dl_btn.is_visible():
+            print("[FlowDownloader] Botão de download de vídeo não visível.")
+            return None
+            
+        dl_btn.click()
+        time.sleep(0.8)
+        
+        # Opção de resolução (ex: 720p)
+        res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}')").first
+        if not res_btn.is_visible():
+            res_btn = self.page.locator("flow-menu-item button").first
+            
+        before_files = set(os.listdir(self.download_dir))
+        res_btn.click()
+        print(f"[FlowDownloader] Opção {resolution} clicada! Aguardando arquivo MP4...")
+        
+        for _ in range(timeout):
+            time.sleep(1)
+            after_files = set(os.listdir(self.download_dir))
+            diff = after_files - before_files
+            new_vids = [f for f in diff if f.endswith(('.mp4', '.mov', '.webm')) and not f.endswith('.crdownload')]
+            if new_vids:
+                downloaded = new_vids[0]
+                full_path = os.path.join(self.download_dir, downloaded)
+                
+                if filename:
+                    if not any(filename.lower().endswith(ext) for ext in ['.mp4', '.mov', '.webm']):
+                        ext = os.path.splitext(downloaded)[1] or '.mp4'
+                        filename = f"{filename}{ext}"
+                    target_path = os.path.join(self.download_dir, filename)
+                    if os.path.exists(target_path):
+                        os.remove(target_path)
+                    os.rename(full_path, target_path)
+                    full_path = target_path
+                    downloaded = filename
+                    
+                print(f"[FlowDownloader] Vídeo baixado com sucesso: {downloaded} ({os.path.getsize(full_path)} bytes)")
+                self.page.keyboard.press("Escape")
+                return full_path
+                
+        self.page.keyboard.press("Escape")
+        return None

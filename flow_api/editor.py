@@ -189,3 +189,117 @@ class FlowEditor:
             
         print("[FlowEditor] Tempo limite esgotado para geração.")
         return False
+
+    def set_video_settings(self, duration: int = 4, resolution: str = "720p", aspect_ratio: str = "16:9"):
+        """Configura estritamente o modo de vídeo no Flow com Gemini Omni Flash 1.1 e validação de segundos."""
+        if duration not in [4, 6, 8, 10]:
+            raise ValueError(f"Duração inválida: {duration}s. O Google Flow suporta apenas 4s, 6s, 8s ou 10s.")
+            
+        settings_btn = self.page.locator("button[aria-label='Gatilho de configurações']").first
+        if not settings_btn.is_visible():
+            return
+            
+        text = settings_btn.inner_text()
+        if "Vídeo" in text and f"{duration}s" in text and resolution in text and aspect_ratio in text:
+            return
+            
+        self.page.keyboard.press("Escape")
+        time.sleep(0.3)
+        settings_btn.click()
+        time.sleep(1)
+        
+        # 1. Aba Vídeo
+        vid_tab = self.page.locator("button:has-text('Vídeo')").first
+        if vid_tab.is_visible():
+            vid_tab.click()
+            time.sleep(0.5)
+            
+        # 2. Aspect Ratio (16:9 ou 9:16)
+        ratio_btn = self.page.locator(f"button:has-text('{aspect_ratio}')").first
+        if ratio_btn.is_visible():
+            ratio_btn.click()
+            time.sleep(0.3)
+            
+        # 3. Duração em segundos
+        dur_btn = self.page.locator(f"button:has-text('{duration}s')").first
+        if dur_btn.is_visible():
+            dur_btn.click()
+            time.sleep(0.3)
+            
+        # 4. Resolução (720p padrão)
+        res_btn = self.page.locator(f"button:has-text('{resolution}')").first
+        if res_btn.is_visible():
+            res_btn.click()
+            time.sleep(0.3)
+            
+        # 5. Garante modelo Omni 1.1 Flash (nunca Veo)
+        model_btn = self.page.locator("button:has-text('Omni 1.1 Flash')").first
+        if not model_btn.is_visible():
+            curr_model_btn = self.page.locator("button[aria-label='Selecionar família de modelos']").first
+            if curr_model_btn.is_visible():
+                curr_model_btn.click()
+                time.sleep(0.5)
+                omni_opt = self.page.locator("[role='option']:has-text('Omni 1.1 Flash')").first
+                if omni_opt.is_visible():
+                    omni_opt.click()
+                    time.sleep(0.3)
+                    
+        # 6. Quantidade x1
+        x1_btn = self.page.locator("button:has-text('x1')").first
+        if x1_btn.is_visible():
+            x1_btn.click()
+            time.sleep(0.3)
+            
+        self.page.keyboard.press("Escape")
+        time.sleep(0.5)
+        print(f"[FlowEditor] Configurações de vídeo ativadas: Omni 1.1 Flash | {duration}s | {resolution} | {aspect_ratio}")
+
+    def submit_video_prompt(self, prompt: str, duration: Optional[int] = None, resolution: str = "720p", aspect_ratio: str = "16:9", reference: Optional[str] = None):
+        """Dispara geração de vídeo (T2V ou I2V) exigindo obrigatoriamente a duração em segundos."""
+        if duration is None:
+            raise ValueError("A duração do vídeo em segundos (4, 6, 8, 10) é OBRIGATÓRIA! O pedido não pode ser aceito sem especificar os segundos.")
+            
+        if reference:
+            self.attach_reference(reference)
+            
+        self.set_video_settings(duration=duration, resolution=resolution, aspect_ratio=aspect_ratio)
+        
+        pm = self.page.locator(".ProseMirror").first
+        if not pm.is_visible():
+            raise RuntimeError("Caixa de comando (.ProseMirror) não encontrada no canvas!")
+            
+        pm.click()
+        time.sleep(0.2)
+        pm.evaluate("(el, text) => { el.innerText = text; el.dispatchEvent(new Event('input', { bubbles: true })); }", prompt)
+        pm.click()
+        flow_page_keyboard = self.page.keyboard
+        flow_page_keyboard.press("End")
+        flow_page_keyboard.type(" ")
+        flow_page_keyboard.press("Backspace")
+        time.sleep(0.5)
+        
+        submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button:has-text('arrow_forward')").first
+        submit_btn.click()
+        print(f"[FlowEditor] Prompt de vídeo enviado com sucesso ({duration}s)!")
+
+    def wait_for_video_generation(self, timeout: int = 180) -> bool:
+        """Aguarda reativamente o término da renderização de vídeo."""
+        print("[FlowEditor] Aguardando renderização do vídeo...")
+        time.sleep(8)
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            is_generating = self.page.evaluate("""() => {
+                const text = document.body.innerText;
+                return text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role=\"progressbar\"]') !== null;
+            }""")
+            if not is_generating:
+                elapsed = int(time.time() - start_time) + 8
+                print(f"[FlowEditor] Renderização de vídeo concluída com sucesso em {elapsed}s!")
+                time.sleep(2)
+                return True
+            time.sleep(3)
+            elapsed = int(time.time() - start_time) + 8
+            print(f"[FlowEditor] Renderizando vídeo... ({elapsed}s)")
+            
+        print("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")
+        return False
