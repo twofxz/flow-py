@@ -9,12 +9,13 @@
 
 ## ✨ Features
 
-- **🚀 Programmatic Python API**: Simple, high-level client to generate and retrieve native original assets.
-- **⚡ Fast CLI (`flow generate`)**: One-liner command generation with structured JSON response.
+- **🚀 Programmatic Python API**: Simple, high-level client to generate and retrieve native original assets (images & videos).
+- **⚡ Fast CLI (`flow generate` & `flow video`)**: One-liner command generation with structured JSON response.
+- **🎬 Native Video Support (Gemini Omni Flash 1.1)**: Text-to-Video and Image-to-Video with mandatory duration validation (`4s`, `6s`, `8s`, `10s`) and native 720p MP4 download.
 - **🔌 OpenAI Compatible (`flow serve`)**: Spin up a local server emulating `POST /v1/images/generations` to seamlessly plug Google Flow into **n8n**, **Dify**, **LangChain**, or existing web UIs!
-- **💎 Native Original Quality**: Retrieves true native 1K/2K resolution without browser-scaled compression.
+- **💎 Native Original Quality**: Retrieves true native 1K/2K resolution for images and 720p MP4 for videos without browser compression.
 - **🔒 Persistent Authentication**: Log in once with your Google account; session stays saved locally.
-- **🛡️ Strict Model Guard**: Automatic enforcement of high-fidelity models (`Nano Banana 2` / `Nano Banana Pro`).
+- **🛡️ Strict Model Guard**: Automatic enforcement of high-fidelity models (`Nano Banana 2` / `Nano Banana Pro` for images; `Gemini Omni Flash 1.1` for video).
 
 ---
 
@@ -57,6 +58,23 @@ flow generate \
   --reference-image "./assets/character.jpg" \
   --filename "character_tennis.jpeg" \
   --resolution 1K
+```
+
+### Generate Video (Text-to-Video & Image-to-Video)
+```bash
+# Text-to-Video (T2V) - 4 seconds
+flow video \
+  --prompt "Cinematic dynamic shot of a matte-black sports car speeding on wet asphalt highway at night..." \
+  --duration 4 \
+  --ratio 16:9 \
+  --filename "carro_noturno.mp4"
+
+# Image-to-Video (I2V) - 4 seconds
+flow video \
+  --prompt "Cinematic tracking shot of the same character running in a park..." \
+  --duration 4 \
+  --reference-image "./assets/character.jpg" \
+  --filename "personagem_correndo.mp4"
 ```
 
 ---
