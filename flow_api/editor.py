@@ -26,8 +26,9 @@ class FlowEditor:
             ratio_key = aspect_ratio.replace(":", "_")
             needs_model_change = model not in text
             needs_ratio_change = ratio_key not in text and aspect_ratio not in text
+            needs_mode_change = "vídeo" in text.lower() or "video" in text.lower() or "720p" in text.lower()
             
-            if not needs_model_change and not needs_ratio_change:
+            if not needs_model_change and not needs_ratio_change and not needs_mode_change:
                 return
                 
             # Abre popover
@@ -36,19 +37,27 @@ class FlowEditor:
             settings_btn.click()
             time.sleep(1)
             
-            # Altera ratio se necessário
-            if needs_ratio_change:
-                ratio_btn = self.page.locator(f"button:has-text('{aspect_ratio}')").first
-                if ratio_btn.is_visible():
-                    ratio_btn.click()
-                    time.sleep(0.5)
-                    print(f"[FlowEditor] Proporção alterada para {aspect_ratio}")
+            # 1. Garante que está na aba Imagem
+            img_tab = self.page.locator("button:has-text('Imagem')").first
+            if img_tab.is_visible():
+                img_tab.click()
+                time.sleep(0.5)
+            
+            # 2. Altera ratio se necessário
+            ratio_btn = self.page.locator(f"button:has-text('{aspect_ratio}')").first
+            if ratio_btn.is_visible():
+                ratio_btn.click()
+                time.sleep(0.5)
+                print(f"[FlowEditor] Proporção alterada para {aspect_ratio}")
                     
-            # Altera modelo se necessário
-            if needs_model_change:
-                model_btn = self.page.locator(f"button:has-text('{model}'), [role='option']:has-text('{model}')").first
-                if model_btn.is_visible():
-                    model_btn.click()
+            # 3. Altera modelo se necessário
+            curr_model = self.page.locator("button[aria-label='Selecionar família de modelos']").first
+            if curr_model.is_visible() and model not in curr_model.inner_text():
+                curr_model.click()
+                time.sleep(0.5)
+                model_opt = self.page.locator(f"[role='option']:has-text('{model}'), button:has-text('{model}')").first
+                if model_opt.is_visible():
+                    model_opt.click()
                     time.sleep(0.5)
                     print(f"[FlowEditor] Modelo alterado para {model}")
                     
@@ -303,3 +312,81 @@ class FlowEditor:
             
         print("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")
         return False
+
+    def submit_batch_concurrent(self, prompts: list, model: str = "Nano Banana 2", aspect_ratio: str = "3:4", reference: Optional[str] = None, delay_between: float = 3.0) -> list:
+        """Submete uma lista de prompts em lote de forma concorrente, aguardando apenas delay_between (default 3s) entre cada envio."""
+        if not prompts:
+            raise ValueError("Lista de prompts não pode ser vazia.")
+
+        self.verify_and_set_settings(model=model, aspect_ratio=aspect_ratio)
+
+        if reference:
+            self.attach_reference(reference)
+            time.sleep(1)
+
+        pm = self.page.locator(".ProseMirror").first
+        if not pm.is_visible():
+            raise RuntimeError("Caixa de comando (.ProseMirror) não encontrada!")
+
+        submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button:has-text('arrow_forward')").first
+
+        submitted = []
+        for i, p_info in enumerate(prompts):
+            p_text = p_info if isinstance(p_info, str) else p_info.get("prompt", "")
+            slide_id = i + 1 if isinstance(p_info, str) else p_info.get("slide", i + 1)
+
+            print(f"[FlowEditor] Disparando Slide {slide_id}/{len(prompts)}...")
+            pm.click()
+            time.sleep(0.2)
+
+            # Injeta texto preservando chip de mídia
+            pm.evaluate("""(el, text) => {
+                const textNodes = Array.from(el.childNodes).filter(node => node.nodeType === Node.TEXT_NODE);
+                if (textNodes.length > 0) {
+                    textNodes[0].textContent = text;
+                } else {
+                    el.appendChild(document.createTextNode(text));
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            }""", p_text)
+
+            # Toque de tecla para disparar reatividade do ProseMirror
+            pm.click()
+            self.page.keyboard.press("End")
+            self.page.keyboard.type(" ")
+            self.page.keyboard.press("Backspace")
+            time.sleep(0.3)
+
+            submit_btn.click()
+            print(f"[FlowEditor] Slide {slide_id} enviado com sucesso! Aguardando {delay_between}s para o próximo...")
+            submitted.append({"slide": slide_id, "prompt": p_text})
+
+            # Intervalo inteligente: aguarda apenas delay_between (default 3s) para o próximo envio
+            if i < len(prompts) - 1:
+                time.sleep(delay_between)
+
+        print(f"[FlowEditor] Todos os {len(submitted)} slides foram disparados com sucesso para renderização concorrente!")
+        return submitted
+
+    def wait_for_batch_completion(self, expected_count: int, timeout: int = 180) -> bool:
+        """Aguarda todos os cards do lote atingirem 100% / finalizarem de forma concorrente."""
+        print(f"[FlowEditor] Aguardando renderização concorrente de {expected_count} cards...")
+        time.sleep(6)
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            is_generating = self.page.evaluate("""() => {
+                const text = document.body.innerText;
+                return text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role=\"progressbar\"]') !== null;
+            }""")
+            if not is_generating:
+                elapsed = int(time.time() - start_time) + 6
+                print(f"[FlowEditor] Renderização de todos os {expected_count} cards concluída com sucesso em {elapsed}s!")
+                time.sleep(2)
+                return True
+            time.sleep(2.5)
+            elapsed = int(time.time() - start_time) + 6
+            print(f"[FlowEditor] Renderizando lote concorrente... ({elapsed}s)")
+
+        print("[FlowEditor] Tempo limite esgotado para renderização do lote.")
+        return False
+

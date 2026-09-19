@@ -13,17 +13,22 @@ class FlowDownloader:
         self.download_dir = download_dir
 
     def open_viewer(self):
-        """Abre o visualizador detalhado a partir do primeiro card de imagem do canvas."""
-        if self.page.locator(".rail-container").is_visible():
+        """Abre o visualizador detalhado a partir do card mais recente do canvas."""
+        if self.page.locator("button[aria-label='Baixar mídia']").is_visible() or self.page.locator(".rail-container").is_visible():
             return
             
-        img = self.page.locator("img").all()
-        for i in img:
+        img = self.page.locator("img:not(.ghost-image)").all()
+        for i in reversed(img):
             box = i.bounding_box()
             if box and box['width'] > 200 and box['height'] > 150:
-                i.click()
-                time.sleep(2)
-                break
+                try:
+                    i.scroll_into_view_if_needed()
+                    i.click(force=True)
+                    time.sleep(2)
+                    if self.page.locator("button[aria-label='Baixar mídia']").is_visible():
+                        break
+                except Exception:
+                    continue
 
     def get_rail_thumbnails(self) -> List[Dict]:
         """Identifica os botões de miniaturas disponíveis na barra superior do visualizador."""
@@ -36,25 +41,26 @@ class FlowDownloader:
                 targets.append({"element": btn, "aria": aria})
         return targets
 
-    def download_current(self, resolution: str = "1K", filename: Optional[str] = None, timeout: int = 12) -> Optional[str]:
+    def download_current(self, resolution: str = "1K", filename: Optional[str] = None, timeout: int = 25) -> Optional[str]:
         """Baixa a mídia ativa na tela na resolução nativa especificada."""
         dl_btn = self.page.locator("button[aria-label='Baixar mídia']").first
         if not dl_btn.is_visible():
             print("[FlowDownloader] Botão de download não visível na tela.")
             return None
             
-        dl_btn.click()
-        time.sleep(0.8)
+        if dl_btn.get_attribute("aria-expanded") != "true":
+            dl_btn.click(force=True)
+            time.sleep(0.8)
         
         # Localiza o botão exato da resolução no menu
-        res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}')").first
+        res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}'), [role='menuitem']:has-text('{resolution}'), flow-menu button:has-text('{resolution}'), button:has-text('{resolution}')").first
         if not res_btn.is_visible():
             print(f"[FlowDownloader] Resolução {resolution} não encontrada no menu.")
             self.page.keyboard.press("Escape")
             return None
             
         before_files = set(os.listdir(self.download_dir))
-        res_btn.click()
+        res_btn.click(force=True)
         
         # Aguarda o arquivo aparecer na pasta
         for _ in range(timeout):
@@ -115,13 +121,32 @@ class FlowDownloader:
         time.sleep(0.8)
         
         # Opção de resolução (ex: 720p)
-        res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}')").first
+        res_btn = self.page.locator(f"text='{resolution}'").first
         if not res_btn.is_visible():
-            res_btn = self.page.locator("flow-menu-item button").first
+            res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}')").first
+        if not res_btn.is_visible():
+            res_btn = self.page.locator("flow-menu-item button, [role='menuitem']").first
             
         before_files = set(os.listdir(self.download_dir))
-        res_btn.click()
-        print(f"[FlowDownloader] Opção {resolution} clicada! Aguardando arquivo MP4...")
+        default_downloads = os.path.expanduser(r"~\Downloads")
+        before_default = set(os.listdir(default_downloads))
+        
+        print(f"[FlowDownloader] Opção {resolution} encontrada! Clicando...")
+        try:
+            with self.page.expect_download(timeout=8000) as download_info:
+                res_btn.click(force=True)
+            download = download_info.value
+            target_name = filename or f"flow_video_{int(time.time())}.mp4"
+            if not target_name.lower().endswith(('.mp4', '.mov', '.webm')):
+                target_name = f"{target_name}.mp4"
+            target_path = os.path.join(self.download_dir, target_name)
+            download.save_as(target_path)
+            self.page.keyboard.press("Escape")
+            print(f"[FlowDownloader] Vídeo baixado com sucesso: {target_name} ({os.path.getsize(target_path)} bytes)")
+            return target_path
+        except Exception as err:
+            print(f"[FlowDownloader] Interceptador de download seguiu via sistema de arquivos: {err}")
+            res_btn.click(force=True)
         
         for _ in range(timeout):
             time.sleep(1)
@@ -147,5 +172,48 @@ class FlowDownloader:
                 self.page.keyboard.press("Escape")
                 return full_path
                 
+            after_default = set(os.listdir(default_downloads))
+            diff_def = after_default - before_default
+            new_vids_def = [f for f in diff_def if f.endswith(('.mp4', '.mov', '.webm')) and not f.endswith('.crdownload')]
+            if new_vids_def:
+                src = os.path.join(default_downloads, new_vids_def[0])
+                target_name = filename or new_vids_def[0]
+                if not target_name.lower().endswith(('.mp4', '.mov', '.webm')):
+                    target_name = f"{target_name}.mp4"
+                dest = os.path.join(self.download_dir, target_name)
+                import shutil
+                shutil.move(src, dest)
+                print(f"[FlowDownloader] Vídeo movido com sucesso: {target_name} ({os.path.getsize(dest)} bytes)")
+                self.page.keyboard.press("Escape")
+                return dest
+                
         self.page.keyboard.press("Escape")
         return None
+
+    def download_batch(self, count: int, filenames: Optional[List[str]] = None, resolution: str = "1K", timeout: int = 25) -> List[str]:
+        """Baixa deterministamente os últimos `count` ativos gerados em lote na resolução nativa."""
+        self.open_viewer()
+        thumbnails = self.get_rail_thumbnails()
+
+        # Seleciona os `count` cards mais recentes da barra de miniaturas
+        selected_thumbs = thumbnails[:count] if len(thumbnails) >= count else thumbnails
+        print(f"[FlowDownloader] Iniciando download do lote ({len(selected_thumbs)}/{count} cards identificados na barra)...")
+
+        downloaded_paths = []
+        for idx, thumb in enumerate(selected_thumbs):
+            custom_name = filenames[idx] if filenames and idx < len(filenames) else f"slide_{idx+1:02d}.jpeg"
+            print(f"[FlowDownloader] [{idx+1}/{len(selected_thumbs)}] Clicando miniatura '{thumb['aria']}' para salvar como '{custom_name}'...")
+            try:
+                thumb['element'].click()
+                time.sleep(1.0)
+                saved_path = self.download_current(resolution=resolution, filename=custom_name, timeout=timeout)
+                if saved_path:
+                    downloaded_paths.append(saved_path)
+            except Exception as e:
+                print(f"[FlowDownloader] Erro ao baixar item {idx+1}: {e}")
+            time.sleep(0.5)
+
+        self.page.keyboard.press("Escape")
+        print(f"[FlowDownloader] Concluído download de {len(downloaded_paths)}/{count} arquivos do lote!")
+        return downloaded_paths
+
