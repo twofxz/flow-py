@@ -194,6 +194,8 @@ class FlowDownloader:
                 return true;
             }
             return false;
+        }""", resolution)
+
         if not res_clicked:
             print(f"[FlowDownloader] Opção {resolution} não encontrada no menu.")
             self.page.keyboard.press("Escape")
