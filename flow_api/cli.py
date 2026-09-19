@@ -27,6 +27,7 @@ def main():
     gen_parser.add_argument("--filename", type=str, default=None, help="Nome personalizado do arquivo salvo (ex: meu_personagem.jpeg)")
     gen_parser.add_argument("--model", type=str, default="Nano Banana 2", help="Modelo de geração")
     gen_parser.add_argument("--ratio", type=str, default="16:9", help="Proporção da imagem (16:9, 9:16, 1:1, 3:4)")
+    gen_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     gen_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     gen_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução nativa de download")
     gen_parser.add_argument("--timeout", type=int, default=90, help="Tempo limite de geração em segundos")
@@ -41,6 +42,7 @@ def main():
     vid_parser.add_argument("--filename", type=str, default=None, help="Nome personalizado do vídeo salvo (ex: meu_video.mp4)")
     vid_parser.add_argument("--ratio", type=str, default="16:9", choices=["16:9", "9:16"], help="Proporção do vídeo (16:9 ou 9:16)")
     vid_parser.add_argument("--resolution", type=str, default="720p", choices=["720p"], help="Resolução do vídeo (estritamente 720p)")
+    vid_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     vid_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     vid_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite de geração em segundos")
 
@@ -53,21 +55,24 @@ def main():
     batch_parser.add_argument("--model", type=str, default="Nano Banana 2", choices=["Nano Banana 2", "Nano Banana Pro"], help="Modelo de imagem")
     batch_parser.add_argument("--ratio", type=str, default="3:4", help="Proporção da imagem (3:4, 16:9, 9:16, 1:1)")
     batch_parser.add_argument("--delay", type=float, default=3.0, help="Intervalo em segundos entre envios (padrão: 3.0s)")
+    batch_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     batch_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     batch_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
     batch_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite total de renderização do lote")
 
     # Comando: test-connection
     test_parser = subparsers.add_parser("test-connection", help="Testa e valida conexão com a aba ativa do Google Flow")
+    test_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
 
     # Comando: download-all
     dl_parser = subparsers.add_parser("download-all", help="Baixa todas as imagens da galeria ativa")
+    dl_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     dl_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     dl_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
     dl_parser.add_argument("--count", type=int, default=None, help="Número máximo de imagens a baixar")
 
     args = parser.parse_args()
-    client = FlowClient(download_dir=getattr(args, "output_dir", None))
+    client = FlowClient(download_dir=getattr(args, "output_dir", None), session=getattr(args, "session", None))
 
     try:
         page = client.connect()
@@ -79,6 +84,7 @@ def main():
             print(json.dumps({
                 "success": True,
                 "status": "connected",
+                "session": client.session,
                 "flow_url": page.url,
                 "title": page.title()
             }, indent=2))
@@ -97,6 +103,7 @@ def main():
             saved_file = downloader.download_current(resolution=args.resolution, filename=args.filename)
             print(json.dumps({
                 "success": True,
+                "session": client.session,
                 "model": args.model,
                 "ratio": args.ratio,
                 "reference": ref,
@@ -116,6 +123,7 @@ def main():
             saved_file = downloader.download_video(resolution=args.resolution, filename=args.filename)
             print(json.dumps({
                 "success": True,
+                "session": client.session,
                 "model": "Omni 1.1 Flash",
                 "duration": f"{args.duration}s",
                 "ratio": args.ratio,
@@ -176,6 +184,7 @@ def main():
 
             print(json.dumps({
                 "success": True,
+                "session": client.session,
                 "type": "batch",
                 "total_slides": len(downloaded),
                 "model": args.model,
