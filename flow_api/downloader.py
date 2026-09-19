@@ -12,16 +12,26 @@ class FlowDownloader:
         self.page = page
         self.download_dir = download_dir
 
-    def open_viewer(self):
-        """Abre o visualizador detalhado a partir do card mais recente do canvas."""
-        if self.page.locator("button[aria-label='Baixar mídia']").is_visible() or self.page.locator(".rail-container").is_visible():
-            return
+    def open_viewer(self, force_newest: bool = False):
+        """Abre o visualizador detalhado a partir do card mais recente do canvas (tiles[0])."""
+        if not force_newest:
+            if self.page.locator("button[aria-label='Baixar mídia']").is_visible() or self.page.locator(".rail-container").is_visible():
+                return
 
-        # 1. Tenta clicar no último flow-grid-tile-container via JS
+        # Se já estiver em rota /edit/ ou viewer aberto e queremos o mais recente, volta ao canvas primeiro
+        if "/edit/" in self.page.url or self.page.locator("button[aria-label='Baixar mídia']").is_visible():
+            self.page.evaluate("""() => {
+                const backBtn = document.querySelector("button[aria-label*='Voltar'], button[aria-label*='Edição concluída'], button[aria-label*='Concluir']");
+                if (backBtn) backBtn.click();
+            }""")
+            self.page.keyboard.press("Escape")
+            time.sleep(1.5)
+
+        # 1. Tenta clicar no primeiro flow-grid-tile-container (card mais recente) via JS
         clicked = self.page.evaluate("""() => {
             const tiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
             if (tiles.length > 0) {
-                tiles[tiles.length - 1].click();
+                tiles[0].click();
                 return true;
             }
             return false;
@@ -32,9 +42,9 @@ class FlowDownloader:
             if self.page.locator("button[aria-label='Baixar mídia']").is_visible():
                 return
 
-        # 2. Fallback para elementos video e img
-        cards = self.page.locator("video, img:not(.ghost-image)").all()
-        for i in reversed(cards):
+        # 2. Fallback para elementos video e img no topo
+        cards = self.page.locator("flow-video-tile, video, img:not(.ghost-image)").all()
+        for i in cards:
             box = i.bounding_box()
             if box and box['width'] > 150:
                 try:
@@ -157,9 +167,9 @@ class FlowDownloader:
             
         return downloaded_paths
 
-    def download_video(self, resolution: str = "720p", filename: Optional[str] = None, timeout: int = 15) -> Optional[str]:
+    def download_video(self, resolution: str = "720p", filename: Optional[str] = None, timeout: int = 30) -> Optional[str]:
         """Baixa o vídeo ativo no visualizador no formato nativo MP4."""
-        self.open_viewer()
+        self.open_viewer(force_newest=True)
         # 1. Clica no botão Baixar mídia via JS
         clicked = self.page.evaluate("""() => {
             const dlBtn = Array.from(document.querySelectorAll('button')).find(b => 

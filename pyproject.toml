@@ -4,31 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "google-flow-api"
-version = "0.1.0"
-description = "Unofficial Python API & CLI for Google Flow media generation (Nano Banana 2 & Veo)"
+version = "1.0.0"
+description = "Unofficial Python API, CLI & MCP Server for Google Flow media generation (Nano Banana 2, Pro & Gemini Omni Flash 1.1)"
 readme = "README.md"
 authors = [
     { name = "Gabriel Siqueira" }
 ]
 license = { text = "MIT" }
-keywords = ["google-flow", "ai", "nano-banana", "image-generation", "veo", "playwright", "automation"]
+keywords = ["google-flow", "ai", "nano-banana", "image-generation", "gemini-omni-flash", "playwright", "automation", "mcp", "claude", "antigravity", "codex", "opencode"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "playwright>=1.40.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
     "pydantic>=2.0.0",
-    "pillow>=10.0.0"
+    "pillow>=10.0.0",
+    "mcp>=1.0.0"
 ]
 
 [project.scripts]
 flow = "flow_api.cli:main"
+google-flow = "flow_api.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

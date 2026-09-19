@@ -36,3 +36,13 @@ downloads_output/
 .idea/
 .vscode/
 *.swp
+
+# Local outputs & scratch scripts
+outputs/
+flow_outputs/
+test_*.py
+check_*.py
+dump_*.py
+get_*.py
+inspect_*.py
+generate_*.py

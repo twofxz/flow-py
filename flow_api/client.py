@@ -9,10 +9,70 @@ import subprocess
 from typing import Optional
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
+import sys
+import shutil
+
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
-DEFAULT_PROFILE = os.path.expanduser(r"~/.google-flow/profile")
-CHROME_BIN = r"C:\Users\FALA MUITO\chrome\win64-153.0.8010.47\chrome-win64\chrome.exe"
+FLOW_HOME = os.environ.get("FLOW_HOME", os.path.expanduser("~/.google-flow"))
+DEFAULT_PROFILE = os.path.join(FLOW_HOME, "profile")
 FLOW_BASE_URL = "https://flow.google.com"
+
+def find_chrome_executable() -> str:
+    """Localiza automaticamente o executável do Google Chrome ou Chromium no sistema (Windows, macOS, Linux)."""
+    # 1. Variável de ambiente explícita
+    env_bin = os.environ.get("FLOW_CHROME_BIN") or os.environ.get("CHROME_PATH")
+    if env_bin and os.path.exists(env_bin):
+        return env_bin
+
+    # 2. Caminhos específicos por plataforma
+    candidates = []
+    if os.name == 'nt':
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        user_profile = os.environ.get("USERPROFILE", "")
+
+        candidates = [
+            # Instalação portátil ou local se configurada
+            os.path.join(user_profile, r"chrome\win64-153.0.8010.47\chrome-win64\chrome.exe"),
+            # Google Chrome padrão
+            os.path.join(program_files, r"Google\Chrome\Application\chrome.exe"),
+            os.path.join(program_files_x86, r"Google\Chrome\Application\chrome.exe"),
+            os.path.join(local_app_data, r"Google\Chrome\Application\chrome.exe"),
+            # Brave Browser
+            os.path.join(program_files, r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+            os.path.join(local_app_data, r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+            # Microsoft Edge
+            os.path.join(program_files, r"Microsoft\Edge\Application\msedge.exe"),
+            os.path.join(program_files_x86, r"Microsoft\Edge\Application\msedge.exe"),
+        ]
+    elif sys.platform == 'darwin':
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+        ]
+    else:  # Linux
+        for binary_name in ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium", "brave-browser"]:
+            path = shutil.which(binary_name)
+            if path:
+                return path
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+
+    # 3. Fallback: procurar no PATH do sistema
+    for bin_name in ["chrome", "chrome.exe", "chromium", "chromium.exe", "msedge", "msedge.exe"]:
+        path = shutil.which(bin_name)
+        if path:
+            return path
+
+    raise FileNotFoundError(
+        "Nenhum executável do Chrome/Chromium encontrado no sistema. "
+        "Por favor, instale o Google Chrome ou defina a variável de ambiente FLOW_CHROME_BIN com o caminho completo do executável."
+    )
 
 def detect_session(session: Optional[str] = None) -> str:
     """Detecta automaticamente o agente de IA ou usa a sessão fornecida."""
@@ -27,7 +87,7 @@ def detect_session(session: Optional[str] = None) -> str:
 class FlowClient:
     def __init__(self, cdp_url: str = DEFAULT_CDP_URL, download_dir: Optional[str] = None, session: Optional[str] = None):
         self.cdp_url = cdp_url
-        self.download_dir = download_dir or os.path.expanduser(r"~\Downloads\google_flow_assets")
+        self.download_dir = download_dir or os.environ.get("FLOW_DOWNLOAD_DIR", os.path.expanduser(r"~\Downloads\google_flow_assets"))
         os.makedirs(self.download_dir, exist_ok=True)
         self.session = detect_session(session)
         
@@ -37,17 +97,18 @@ class FlowClient:
         self.page: Optional[Page] = None
         
     def start_browser_if_needed(self):
-        """Verifica a porta 9222 e inicia o Chromium persistente via WMI se necessário."""
+        """Verifica a porta 9222 e inicia o Chromium persistente de forma cross-platform se necessário."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = sock.connect_ex(('127.0.0.1', 9222))
         sock.close()
         
         if result != 0:
-            print("[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente...")
+            chrome_bin = find_chrome_executable()
+            print(f"[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente ({chrome_bin})...")
             if os.name == 'nt':
-                # Usa WMI (Win32_Process) para desacoplar totalmente do Job Object do terminal
+                # Usa WMI (Win32_Process) no Windows para desacoplar totalmente do Job Object do terminal
                 cmd_line = (
-                    f'"{CHROME_BIN}" '
+                    f'"{chrome_bin}" '
                     f'--remote-debugging-port=9222 '
                     f'--user-data-dir="{DEFAULT_PROFILE}" '
                     f'--no-first-run '
@@ -61,14 +122,17 @@ class FlowClient:
                 subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True)
             else:
                 cmd = [
-                    CHROME_BIN,
+                    chrome_bin,
                     "--remote-debugging-port=9222",
                     f"--user-data-dir={DEFAULT_PROFILE}",
                     "--no-first-run",
                     "--no-default-browser-check",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
                     FLOW_BASE_URL
                 ]
-                subprocess.Popen(cmd, close_fds=True)
+                subprocess.Popen(cmd, start_new_session=True, close_fds=True)
             time.sleep(3)
 
     def get_cached_project_url(self) -> Optional[str]:
@@ -248,6 +312,48 @@ class FlowClient:
                 "behavior": "allow",
                 "downloadPath": self.download_dir
             })
+
+    def check_auth_status(self) -> dict:
+        """Verifica se o navegador está ativo e se a sessão do Google Flow está autenticada."""
+        try:
+            self.connect()
+            if not self.page:
+                return {"authenticated": False, "status": "disconnected", "error": "Página não conectada"}
+            
+            url = self.page.url
+            if "accounts.google.com" in url or "signin" in url:
+                return {
+                    "authenticated": False,
+                    "status": "auth_required",
+                    "url": url,
+                    "message": "Login necessário com a conta Google."
+                }
+            
+            needs_login = self.page.evaluate("""() => {
+                const text = document.body.innerText;
+                return text.includes('Fazer login') || text.includes('Sign in');
+            }""")
+            if needs_login:
+                return {
+                    "authenticated": False,
+                    "status": "auth_required",
+                    "url": url,
+                    "message": "Faça login com sua conta Google na janela aberta."
+                }
+            
+            return {
+                "authenticated": True,
+                "status": "ready",
+                "url": url,
+                "session": self.session,
+                "profile_dir": DEFAULT_PROFILE
+            }
+        except Exception as e:
+            return {
+                "authenticated": False,
+                "status": "error",
+                "error": str(e)
+            }
 
     def close(self):
         """Libera o lock da aba e finaliza a sessão Playwright mantendo o Chromium aberto."""

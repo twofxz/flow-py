@@ -209,11 +209,30 @@ class FlowEditor:
         submit_btn.click()
         print("[FlowEditor] Prompt enviado com sucesso!")
 
+    def check_error_alerts(self) -> Optional[str]:
+        """Verifica se há alertas de erro, bloqueio de segurança ou limite de cota no DOM."""
+        return self.page.evaluate("""() => {
+            const alerts = Array.from(document.querySelectorAll('.mat-mdc-snack-bar-container, [role="alert"], [role="status"]'));
+            for (const a of alerts) {
+                const text = a.innerText || '';
+                const lower = text.toLowerCase();
+                if (lower.includes('não foi possível') || lower.includes('erro') || lower.includes('diretriz') || lower.includes('política') || lower.includes('policy') || lower.includes('limite') || lower.includes('quota') || lower.includes('blocked')) {
+                    return text.trim();
+                }
+            }
+            return null;
+        }""")
+
     def wait_for_generation(self, timeout: int = 90) -> bool:
-        """Aguarda reativamente o término da renderização."""
+        """Aguarda reativamente o término da renderização com monitoramento ativo de erros e políticas."""
         start_time = time.time()
         time.sleep(4)
         while time.time() - start_time < timeout:
+            err = self.check_error_alerts()
+            if err:
+                print(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
+                raise RuntimeError(f"Google Flow Error: {err}")
+
             state = self.page.evaluate("""() => {
                 const text = document.body.innerText;
                 const isGenerating = text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role="progressbar"]') !== null;
@@ -334,22 +353,27 @@ class FlowEditor:
         print(f"[FlowEditor] Prompt de vídeo enviado com sucesso ({duration}s - Omni 1.1 Flash)!")
 
     def wait_for_video_generation(self, timeout: int = 180) -> bool:
-        """Aguarda reativamente o término da renderização de vídeo."""
+        """Aguarda reativamente o término da renderização de vídeo com monitoramento ativo de erros e políticas."""
         print("[FlowEditor] Aguardando renderização do vídeo...")
-        time.sleep(8)
+        time.sleep(6)
         start_time = time.time()
         while time.time() - start_time < timeout:
+            err = self.check_error_alerts()
+            if err:
+                print(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
+                raise RuntimeError(f"Google Flow Error: {err}")
+
             is_generating = self.page.evaluate("""() => {
                 const text = document.body.innerText;
                 return text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role=\"progressbar\"]') !== null;
             }""")
             if not is_generating:
-                elapsed = int(time.time() - start_time) + 8
+                elapsed = int(time.time() - start_time) + 6
                 print(f"[FlowEditor] Renderização de vídeo concluída com sucesso em {elapsed}s!")
                 time.sleep(2)
                 return True
             time.sleep(3)
-            elapsed = int(time.time() - start_time) + 8
+            elapsed = int(time.time() - start_time) + 6
             print(f"[FlowEditor] Renderizando vídeo... ({elapsed}s)")
             
         print("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")

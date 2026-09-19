@@ -60,6 +60,22 @@ def main():
     batch_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
     batch_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite total de renderização do lote")
 
+    # Comando: login (onboarding)
+    login_parser = subparsers.add_parser("login", help="Inicia o navegador dedicado para login interativo com a conta Google")
+    login_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente")
+
+    # Comando: status / doctor
+    status_parser = subparsers.add_parser("status", help="Diagnostica a conexão, perfil, autenticação e projeto ativo do Google Flow")
+    status_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente")
+
+    # Comando: serve (OpenAI-compatible FastAPI)
+    serve_parser = subparsers.add_parser("serve", help="Inicia a API local compatível com OpenAI (POST /v1/images/generations)")
+    serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host do servidor (padrão: 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Porta do servidor (padrão: 8000)")
+
+    # Comando: mcp (Model Context Protocol para Claude/Cursor/OpenCode)
+    mcp_parser = subparsers.add_parser("mcp", help="Inicia o servidor MCP nativo via stdio para Claude Desktop, Cursor e OpenCode")
+
     # Comando: test-connection
     test_parser = subparsers.add_parser("test-connection", help="Testa e valida conexão com a aba ativa do Google Flow")
     test_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
@@ -72,9 +88,57 @@ def main():
     dl_parser.add_argument("--count", type=int, default=None, help="Número máximo de imagens a baixar")
 
     args = parser.parse_args()
+
+    # Roteamento especial para comandos que gerenciam seus próprios ciclos
+    if args.command == "serve":
+        import uvicorn
+        from .server import app
+        print(f"[FlowAPI] Iniciando servidor OpenAI-compatível em http://{args.host}:{args.port}")
+        uvicorn.run(app, host=args.host, port=args.port)
+        return
+
+    if args.command == "mcp":
+        from .mcp_server import main as mcp_main
+        mcp_main()
+        return
+
     client = FlowClient(download_dir=getattr(args, "output_dir", None), session=getattr(args, "session", None))
 
     try:
+        if args.command == "login":
+            print("=" * 60)
+            print("🔐 GOOGLE FLOW - LOGIN & ONBOARDING")
+            print("=" * 60)
+            print("Iniciando o navegador persistente...")
+            client.start_browser_if_needed()
+            page = client.connect()
+            print("\n👉 O navegador foi aberto na página do Google Flow.")
+            print("👉 Se você ainda não estiver logado, faça login com sua conta Google na janela do Chrome.")
+            print("👉 Aceite os termos de serviço caso seja seu primeiro acesso.")
+            print("\nQuando estiver logado e visualizando o painel do Flow, pressione [ENTER] aqui no terminal...")
+            try:
+                input()
+            except EOFError:
+                pass
+            
+            client.dismiss_modals()
+            auth = client.check_auth_status()
+            if auth.get("authenticated"):
+                print("\n✅ Autenticação confirmada com sucesso!")
+                print(f"Projeto ativo: {auth.get('url')}")
+                print(f"Perfil salvo em: {auth.get('profile_dir')}")
+                print("\nPronto para gerar imagens e vídeos via CLI, MCP ou Python API!")
+            else:
+                print("\n⚠️ Não foi possível confirmar o login:")
+                print(json.dumps(auth, indent=2))
+            return
+
+        elif args.command == "status":
+            client.start_browser_if_needed()
+            auth = client.check_auth_status()
+            print(json.dumps(auth, indent=2))
+            return
+
         page = client.connect()
         editor = FlowEditor(page)
         downloader = FlowDownloader(page, client.download_dir)
