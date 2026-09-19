@@ -191,29 +191,60 @@ class FlowDownloader:
         return None
 
     def download_batch(self, count: int, filenames: Optional[List[str]] = None, resolution: str = "1K", timeout: int = 25) -> List[str]:
-        """Baixa deterministamente os últimos `count` ativos gerados em lote na resolução nativa."""
-        self.open_viewer()
-        thumbnails = self.get_rail_thumbnails()
+        """Baixa deterministamente os últimos `count` ativos gerados em lote na ordem correta (Slide 1 a N)."""
+        # Garante retorno ao canvas
+        back_btn = self.page.locator("button[aria-label*='Voltar'], button[aria-label*='voltar']").first
+        if back_btn.is_visible():
+            back_btn.click()
+            time.sleep(1)
 
-        # Seleciona os `count` cards mais recentes da barra de miniaturas
-        selected_thumbs = thumbnails[:count] if len(thumbnails) >= count else thumbnails
-        print(f"[FlowDownloader] Iniciando download do lote ({len(selected_thumbs)}/{count} cards identificados na barra)...")
+        # Localiza os cards de imagem gerados no canvas
+        cards = self.page.locator("img[alt*='Bloco mostrando'], img[alt*='Card showing'], img[alt*='Imagem']").all()
+        if not cards:
+            cards = [img for img in self.page.locator("img:not(.ghost-image)").all() 
+                     if img.bounding_box() and img.bounding_box()['width'] > 180]
+
+        total_found = len(cards)
+        print(f"[FlowDownloader] Total de {total_found} cards identificados no canvas.")
+
+        if total_found < count:
+            print(f"[FlowDownloader] Aviso: esperados {count} cards, mas encontrados {total_found}. Baixando disponíveis.")
+            target_cards = cards
+        else:
+            target_cards = cards[:count]
+
+        # No Google Flow, o card mais recente fica no topo (index 0).
+        # Para salvar Slide 1 -> Slide N na ordem correta de criação, invertemos a lista dos top 'count' cards:
+        ordered_cards = list(reversed(target_cards))
+        print(f"[FlowDownloader] Iniciando download de {len(ordered_cards)} slides ordenados (Slide 1 ao {len(ordered_cards)})...")
 
         downloaded_paths = []
-        for idx, thumb in enumerate(selected_thumbs):
+        for idx, card in enumerate(ordered_cards):
             custom_name = filenames[idx] if filenames and idx < len(filenames) else f"slide_{idx+1:02d}.jpeg"
-            print(f"[FlowDownloader] [{idx+1}/{len(selected_thumbs)}] Clicando miniatura '{thumb['aria']}' para salvar como '{custom_name}'...")
+            print(f"[FlowDownloader] [{idx+1}/{len(ordered_cards)}] Abrindo card do Slide {idx+1} para salvar como '{custom_name}'...")
             try:
-                thumb['element'].click()
-                time.sleep(1.0)
+                card.scroll_into_view_if_needed()
+                card.click(force=True)
+                time.sleep(1.5)
+
                 saved_path = self.download_current(resolution=resolution, filename=custom_name, timeout=timeout)
                 if saved_path:
                     downloaded_paths.append(saved_path)
-            except Exception as e:
-                print(f"[FlowDownloader] Erro ao baixar item {idx+1}: {e}")
-            time.sleep(0.5)
+                else:
+                    print(f"[FlowDownloader] Falha ao baixar Slide {idx+1} ('{custom_name}').")
 
-        self.page.keyboard.press("Escape")
-        print(f"[FlowDownloader] Concluído download de {len(downloaded_paths)}/{count} arquivos do lote!")
+                # Retorna ao canvas para o próximo card
+                back = self.page.locator("button[aria-label*='Voltar'], button[aria-label*='voltar']").first
+                if back.is_visible():
+                    back.click()
+                else:
+                    self.page.keyboard.press("Escape")
+                time.sleep(1.0)
+            except Exception as e:
+                print(f"[FlowDownloader] Erro ao processar Slide {idx+1}: {e}")
+                self.page.keyboard.press("Escape")
+                time.sleep(1.0)
+
+        print(f"[FlowDownloader] Concluído download de {len(downloaded_paths)}/{count} arquivos do lote com ordem determinística garantida!")
         return downloaded_paths
 
