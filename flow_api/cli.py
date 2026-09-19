@@ -109,12 +109,34 @@ def main():
             print("=" * 60)
             print("🔐 GOOGLE FLOW - LOGIN & ONBOARDING")
             print("=" * 60)
-            print("Iniciando o navegador persistente...")
             client.start_browser_if_needed()
             page = client.connect()
+
+            # Restaura a janela se estiver minimizada e traz para a frente via CDP
+            try:
+                cdp = client.context.new_cdp_session(page)
+                win = cdp.send("Browser.getWindowForTarget")
+                cdp.send("Browser.setWindowBounds", {
+                    "windowId": win["windowId"],
+                    "bounds": {"windowState": "normal"}
+                })
+                page.bring_to_front()
+            except Exception:
+                pass
+
+            client.dismiss_modals()
+            auth = client.check_auth_status()
+
+            if auth.get("authenticated"):
+                print("\n✅ Você já está autenticado com sucesso no Google Flow!")
+                print(f"🔗 Projeto ativo: {auth.get('url')}")
+                print(f"📁 Perfil salvo em: {auth.get('profile_dir')}")
+                print("\nVocê não precisa fazer login novamente. O sistema está 100% pronto para gerar imagens e vídeos!")
+                return
+
             print("\n👉 O navegador foi aberto na página do Google Flow.")
-            print("👉 Se você ainda não estiver logado, faça login com sua conta Google na janela do Chrome.")
-            print("👉 Aceite os termos de serviço caso seja seu primeiro acesso.")
+            print("👉 Verifique a janela do Google Chrome aberta na sua barra de tarefas.")
+            print("👉 Faça login com sua conta Google e aceite os termos de serviço caso seja o primeiro acesso.")
             print("\nQuando estiver logado e visualizando o painel do Flow, pressione [ENTER] aqui no terminal...")
             try:
                 input()
@@ -125,8 +147,8 @@ def main():
             auth = client.check_auth_status()
             if auth.get("authenticated"):
                 print("\n✅ Autenticação confirmada com sucesso!")
-                print(f"Projeto ativo: {auth.get('url')}")
-                print(f"Perfil salvo em: {auth.get('profile_dir')}")
+                print(f"🔗 Projeto ativo: {auth.get('url')}")
+                print(f"📁 Perfil salvo em: {auth.get('profile_dir')}")
                 print("\nPronto para gerar imagens e vídeos via CLI, MCP ou Python API!")
             else:
                 print("\n⚠️ Não foi possível confirmar o login:")

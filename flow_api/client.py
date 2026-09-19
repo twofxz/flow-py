@@ -316,7 +316,8 @@ class FlowClient:
     def check_auth_status(self) -> dict:
         """Verifica se o navegador está ativo e se a sessão do Google Flow está autenticada."""
         try:
-            self.connect()
+            if not self.page:
+                self.connect()
             if not self.page:
                 return {"authenticated": False, "status": "disconnected", "error": "Página não conectada"}
             
