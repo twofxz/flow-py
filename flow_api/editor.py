@@ -119,36 +119,40 @@ class FlowEditor:
 
     def attach_reference_from_library(self, reference_name: str = "character_reference.jpg"):
         """Anexa um recurso de mídia existente da biblioteca do projeto como chip de referência."""
+        # Se já tiver chip anexado, remove para garantir que não acumule
+        has_chip = self.page.evaluate("""() => {
+            return document.querySelectorAll('button.chip-container, button[aria-label="Elemento"]').length > 0;
+        }""")
+        if has_chip:
+            remove_chip_btn = self.page.locator("button.chip-container, button[aria-label='Elemento'], button[aria-label*='Remover'], button:has-text('cancel')").first
+            if remove_chip_btn.is_visible():
+                remove_chip_btn.click(force=True)
+                time.sleep(0.3)
+
         self.page.keyboard.press("Escape")
-        time.sleep(0.3)
-        
-        remove_chip_btn = self.page.locator("button[aria-label*='Remover'], button[aria-label*='remover'], button:has-text('close')").first
-        if remove_chip_btn.is_visible():
-            remove_chip_btn.click()
-            time.sleep(0.4)
-            
-        add_btn = self.page.locator("button[aria-label='Adicionar elementos à caixa de comando']").first
+        time.sleep(0.2)
+
+        add_btn = self.page.locator("button[aria-label*='Adicionar elementos']").first
         if not add_btn.is_visible():
             raise RuntimeError("Botão de adicionar elementos à caixa de comando não visível!")
-        add_btn.click()
-        time.sleep(1.2)
-        
-        search_input = self.page.locator("input[placeholder*='Pesquisar']").first
-        if search_input.is_visible():
-            search_input.fill(reference_name)
-            time.sleep(0.8)
-            
-        char_item = self.page.locator(f"text='{reference_name}'").first
-        if char_item.is_visible():
-            char_item.click()
-        else:
-            self.page.mouse.click(400, 95)
+        add_btn.click(force=True)
         time.sleep(0.8)
-        
-        include_btn = self.page.locator("button:has-text('Incluir no comando')").first
-        if include_btn.is_visible():
-            include_btn.click()
-        time.sleep(1.2)
+
+        base_name = os.path.splitext(reference_name)[0]
+        target = self.page.locator(f".cdk-overlay-pane button.asset-item:has-text('{reference_name}'), .cdk-overlay-pane button.asset-item:has-text('{base_name}')").first
+        if not target.is_visible():
+            target = self.page.locator(".cdk-overlay-pane button.asset-item").first
+
+        if target.is_visible():
+            target.click(force=True)
+            time.sleep(0.5)
+            include_btn = self.page.locator("button:has-text('Incluir no comando')").first
+            if include_btn.is_visible():
+                include_btn.click(force=True)
+                time.sleep(0.5)
+
+        self.page.keyboard.press("Escape")
+        time.sleep(0.3)
         print(f"[FlowEditor] Chip de referência anexado com sucesso: {reference_name}")
 
     def submit_prompt(self, prompt: str, model: str = "Nano Banana 2", aspect_ratio: str = "16:9", reference: Optional[str] = None):
@@ -314,15 +318,18 @@ class FlowEditor:
         return False
 
     def submit_batch_concurrent(self, prompts: list, model: str = "Nano Banana 2", aspect_ratio: str = "3:4", reference: Optional[str] = None, delay_between: float = 3.0) -> list:
-        """Submete uma lista de prompts em lote de forma concorrente, aguardando apenas delay_between (default 3s) entre cada envio."""
+        """Submete uma lista de prompts em lote de forma concorrente, garantindo re-anexação rápida do chip a cada slide."""
         if not prompts:
             raise ValueError("Lista de prompts não pode ser vazia.")
 
         self.verify_and_set_settings(model=model, aspect_ratio=aspect_ratio)
 
+        ref_name = None
         if reference:
-            self.attach_reference(reference)
-            time.sleep(1)
+            if os.path.exists(reference):
+                ref_name = self.upload_reference_image(reference)
+            else:
+                ref_name = reference
 
         pm = self.page.locator(".ProseMirror").first
         if not pm.is_visible():
@@ -336,32 +343,48 @@ class FlowEditor:
             slide_id = i + 1 if isinstance(p_info, str) else p_info.get("slide", i + 1)
 
             print(f"[FlowEditor] Disparando Slide {slide_id}/{len(prompts)}...")
-            pm.click()
-            time.sleep(0.2)
 
-            # Injeta texto preservando chip de mídia
+            # 1. Garante que o chip de referência esteja anexado (Flow limpa a cada envio)
+            if ref_name:
+                has_chip = self.page.evaluate("""() => {
+                    return document.querySelectorAll('button.chip-container, button[aria-label=\"Elemento\"]').length > 0;
+                }""")
+                if not has_chip:
+                    self.attach_reference(ref_name)
+
+            # 2. Aguarda o botão de envio estar pronto/habilitado
+            start_wait = time.time()
+            while time.time() - start_wait < 15:
+                is_ready = self.page.evaluate("""() => {
+                    const btn = document.querySelector("button[aria-label*='geração'], button[aria-label*='Iniciar'], button.generate-icon-button");
+                    return btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true';
+                }""")
+                if is_ready:
+                    break
+                time.sleep(0.5)
+
+            # 3. Insere o prompt na caixa ProseMirror
+            pm.click(force=True)
+            time.sleep(0.2)
+            self.page.keyboard.press("Control+A")
+            self.page.keyboard.press("Backspace")
+            time.sleep(0.1)
+
             pm.evaluate("""(el, text) => {
-                const textNodes = Array.from(el.childNodes).filter(node => node.nodeType === Node.TEXT_NODE);
-                if (textNodes.length > 0) {
-                    textNodes[0].textContent = text;
-                } else {
-                    el.appendChild(document.createTextNode(text));
-                }
+                el.innerText = text;
                 el.dispatchEvent(new Event('input', { bubbles: true }));
             }""", p_text)
-
-            # Toque de tecla para disparar reatividade do ProseMirror
-            pm.click()
             self.page.keyboard.press("End")
             self.page.keyboard.type(" ")
             self.page.keyboard.press("Backspace")
             time.sleep(0.3)
 
-            submit_btn.click()
+            # 4. Clica no botão de iniciar geração
+            submit_btn.click(force=True)
             print(f"[FlowEditor] Slide {slide_id} enviado com sucesso! Aguardando {delay_between}s para o próximo...")
             submitted.append({"slide": slide_id, "prompt": p_text})
 
-            # Intervalo inteligente: aguarda apenas delay_between (default 3s) para o próximo envio
+            # Intervalo entre envios (padrão 3s)
             if i < len(prompts) - 1:
                 time.sleep(delay_between)
 
