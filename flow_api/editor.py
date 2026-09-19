@@ -294,33 +294,44 @@ class FlowEditor:
         time.sleep(0.5)
         print(f"[FlowEditor] Configurações de vídeo ativadas: Omni 1.1 Flash | {duration}s | {resolution} | {aspect_ratio}")
 
-    def submit_video_prompt(self, prompt: str, duration: Optional[int] = None, resolution: str = "720p", aspect_ratio: str = "16:9", reference: Optional[str] = None):
-        """Dispara geração de vídeo (T2V ou I2V) exigindo obrigatoriamente a duração em segundos."""
+    def submit_video_prompt(self, prompt: str, duration: Optional[int] = None, resolution: str = "720p", aspect_ratio: str = "16:9", reference: Optional[Union[str, List[str]]] = None):
+        """Dispara geração de vídeo (T2V ou I2V) exigindo obrigatoriamente a duração em segundos (4s, 6s, 8s, 10s)."""
         if duration is None:
             raise ValueError("A duração do vídeo em segundos (4, 6, 8, 10) é OBRIGATÓRIA! O pedido não pode ser aceito sem especificar os segundos.")
-            
-        if reference:
-            self.attach_reference(reference)
-            
+
+        # 1. Configura parâmetros de vídeo (Omni 1.1 Flash, duração, resolução e aspect ratio)
         self.set_video_settings(duration=duration, resolution=resolution, aspect_ratio=aspect_ratio)
-        
+
+        # 2. Anexa referências de imagem (Image-to-Video)
+        if reference:
+            refs = reference if isinstance(reference, list) else [reference]
+            self.attach_references(refs)
+
         pm = self.page.locator(".ProseMirror").first
         if not pm.is_visible():
             raise RuntimeError("Caixa de comando (.ProseMirror) não encontrada no canvas!")
-            
-        pm.click()
+
+        # 3. Insere prompt preservando chips anexados
+        pm.click(force=True)
         time.sleep(0.2)
-        pm.evaluate("(el, text) => { el.innerText = text; el.dispatchEvent(new Event('input', { bubbles: true })); }", prompt)
-        pm.click()
-        flow_page_keyboard = self.page.keyboard
-        flow_page_keyboard.press("End")
-        flow_page_keyboard.type(" ")
-        flow_page_keyboard.press("Backspace")
+        pm.evaluate("""(el, text) => {
+            let p = el.querySelector('p');
+            if (!p) {
+                p = document.createElement('p');
+                el.appendChild(p);
+            }
+            p.innerText = text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""", prompt)
+
+        self.page.keyboard.press("End")
+        self.page.keyboard.type(" ")
+        self.page.keyboard.press("Backspace")
         time.sleep(0.5)
-        
+
         submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button:has-text('arrow_forward')").first
-        submit_btn.click()
-        print(f"[FlowEditor] Prompt de vídeo enviado com sucesso ({duration}s)!")
+        submit_btn.click(force=True)
+        print(f"[FlowEditor] Prompt de vídeo enviado com sucesso ({duration}s - Omni 1.1 Flash)!")
 
     def wait_for_video_generation(self, timeout: int = 180) -> bool:
         """Aguarda reativamente o término da renderização de vídeo."""

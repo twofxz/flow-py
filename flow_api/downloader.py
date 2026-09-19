@@ -16,11 +16,27 @@ class FlowDownloader:
         """Abre o visualizador detalhado a partir do card mais recente do canvas."""
         if self.page.locator("button[aria-label='Baixar mídia']").is_visible() or self.page.locator(".rail-container").is_visible():
             return
-            
-        img = self.page.locator("img:not(.ghost-image)").all()
-        for i in reversed(img):
+
+        # 1. Tenta clicar no último flow-grid-tile-container via JS
+        clicked = self.page.evaluate("""() => {
+            const tiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
+            if (tiles.length > 0) {
+                tiles[tiles.length - 1].click();
+                return true;
+            }
+            return false;
+        }""")
+
+        if clicked:
+            time.sleep(2)
+            if self.page.locator("button[aria-label='Baixar mídia']").is_visible():
+                return
+
+        # 2. Fallback para elementos video e img
+        cards = self.page.locator("video, img:not(.ghost-image)").all()
+        for i in reversed(cards):
             box = i.bounding_box()
-            if box and box['width'] > 200 and box['height'] > 150:
+            if box and box['width'] > 150:
                 try:
                     i.scroll_into_view_if_needed()
                     i.click(force=True)
@@ -144,42 +160,46 @@ class FlowDownloader:
     def download_video(self, resolution: str = "720p", filename: Optional[str] = None, timeout: int = 15) -> Optional[str]:
         """Baixa o vídeo ativo no visualizador no formato nativo MP4."""
         self.open_viewer()
-        dl_btn = self.page.locator("button[aria-label='Baixar mídia']").first
-        if not dl_btn.is_visible():
+        # 1. Clica no botão Baixar mídia via JS
+        clicked = self.page.evaluate("""() => {
+            const dlBtn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
+            );
+            if (!dlBtn) return false;
+            dlBtn.click();
+            return true;
+        }""")
+        if not clicked:
             print("[FlowDownloader] Botão de download de vídeo não visível.")
             return None
-            
-        dl_btn.click()
+
         time.sleep(0.8)
-        
-        # Opção de resolução (ex: 720p)
-        res_btn = self.page.locator(f"text='{resolution}'").first
-        if not res_btn.is_visible():
-            res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}')").first
-        if not res_btn.is_visible():
-            res_btn = self.page.locator("flow-menu-item button, [role='menuitem']").first
-            
-        before_files = set(os.listdir(self.download_dir))
+
+        before_files = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
         default_downloads = os.path.expanduser(r"~\Downloads")
-        before_default = set(os.listdir(default_downloads))
-        
-        print(f"[FlowDownloader] Opção {resolution} encontrada! Clicando...")
-        try:
-            with self.page.expect_download(timeout=8000) as download_info:
-                res_btn.click(force=True)
-            download = download_info.value
-            target_name = filename or f"flow_video_{int(time.time())}.mp4"
-            if not target_name.lower().endswith(('.mp4', '.mov', '.webm')):
-                target_name = f"{target_name}.mp4"
-            target_path = os.path.join(self.download_dir, target_name)
-            download.save_as(target_path)
+        before_default = set(os.listdir(default_downloads)) if os.path.exists(default_downloads) else set()
+
+        # 2. Clica na opção de resolução via JS (720p padrão)
+        print(f"[FlowDownloader] Selecionando resolução {resolution}...")
+        res_clicked = self.page.evaluate("""(res) => {
+            const items = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button, span'));
+            const target = items.find(m => m.innerText && m.innerText.includes(res));
+            if (target) {
+                target.click();
+                return true;
+            }
+            const fallback = items.find(m => m.innerText && (m.innerText.includes('MP4') || m.innerText.includes('720p') || m.innerText.includes('Original')));
+            if (fallback) {
+                fallback.click();
+                return true;
+            }
+            return false;
+        if not res_clicked:
+            print(f"[FlowDownloader] Opção {resolution} não encontrada no menu.")
             self.page.keyboard.press("Escape")
-            print(f"[FlowDownloader] Vídeo baixado com sucesso: {target_name} ({os.path.getsize(target_path)} bytes)")
-            return target_path
-        except Exception as err:
-            print(f"[FlowDownloader] Interceptador de download seguiu via sistema de arquivos: {err}")
-            res_btn.click(force=True)
-        
+            return None
+
+        # 3. Monitora o surgimento do arquivo de vídeo no sistema de arquivos
         for _ in range(timeout):
             time.sleep(1)
             after_files = set(os.listdir(self.download_dir))
