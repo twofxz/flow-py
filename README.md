@@ -80,6 +80,17 @@ flow video \
   --filename "personagem_correndo.mp4"
 ```
 
+### Generate Batch / Carousel Concurrently (Fast 3s Prompt Dispatch)
+```bash
+flow batch \
+  --manifest "./prompts.json" \
+  --reference "athlete_reference.png" \
+  --ratio 3:4 \
+  --delay 3.0 \
+  --output-dir "./output_carousel"
+```
+Dispatches all carousel prompts with a **3-second interval**, renders them in parallel on Google's cloud TPUs, and downloads all 1K native files deterministically in ~2 minutes!
+
 ---
 
 ## 🐍 Python API Usage
