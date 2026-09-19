@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Optional
+from typing import Optional, List, Union, Dict
 from playwright.sync_api import Page
 
 # Política Estrita de Modelos da Skill:
@@ -20,7 +20,8 @@ class FlowEditor:
         settings_btn = self.page.locator("button[aria-label='Gatilho de configurações']").first
         if settings_btn.is_visible():
             text = settings_btn.inner_text()
-            print(f"[FlowEditor] Configurações ativas no canvas: {repr(text)}")
+            safe_text = text.encode('ascii', errors='replace').decode('ascii')
+            print(f"[FlowEditor] Configurações ativas no canvas: {repr(safe_text)}")
             
             # Formata chave de busca do ratio (ex: 9:16 -> crop_9_16)
             ratio_key = aspect_ratio.replace(":", "_")
@@ -108,57 +109,77 @@ class FlowEditor:
         self.page.keyboard.press("Escape")
         return filename
 
-    def attach_reference(self, reference: str):
-        """Anexa uma referência ao comando, aceitando tanto caminho local de arquivo quanto nome na biblioteca."""
-        if os.path.exists(reference):
-            ref_name = self.upload_reference_image(reference)
-        else:
-            ref_name = reference
+    def attach_references(self, references: List[str]):
+        """Anexa múltiplas referências visuais à caixa de comando, garantindo upload nativo se necessário."""
+        if not references:
+            return
             
-        self.attach_reference_from_library(ref_name)
-
-    def attach_reference_from_library(self, reference_name: str = "character_reference.jpg"):
-        """Anexa um recurso de mídia existente da biblioteca do projeto como chip de referência."""
-        # Se já tiver chip anexado, remove para garantir que não acumule
-        has_chip = self.page.evaluate("""() => {
-            return document.querySelectorAll('button.chip-container, button[aria-label="Elemento"]').length > 0;
-        }""")
-        if has_chip:
-            remove_chip_btn = self.page.locator("button.chip-container, button[aria-label='Elemento'], button[aria-label*='Remover'], button:has-text('cancel')").first
-            if remove_chip_btn.is_visible():
-                remove_chip_btn.click(force=True)
-                time.sleep(0.3)
-
+        ref_names = []
+        for ref in references:
+            if os.path.exists(ref):
+                ref_name = self.upload_reference_image(ref)
+                ref_names.append(ref_name)
+            else:
+                ref_names.append(ref)
+                
+        # 1. Limpa chips pré-existentes na barra de comando
+        chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+        for ch in chips:
+            try:
+                ch.locator("button, [role='button'], .close, [aria-label*='remover']").first.click(force=True)
+            except Exception:
+                try:
+                    ch.click(force=True)
+                except Exception:
+                    pass
+        time.sleep(0.3)
         self.page.keyboard.press("Escape")
         time.sleep(0.2)
 
+        # 2. Anexa cada uma das referências
         add_btn = self.page.locator("button[aria-label*='Adicionar elementos']").first
         if not add_btn.is_visible():
             raise RuntimeError("Botão de adicionar elementos à caixa de comando não visível!")
-        add_btn.click(force=True)
-        time.sleep(0.8)
 
-        base_name = os.path.splitext(reference_name)[0]
-        target = self.page.locator(f".cdk-overlay-pane button.asset-item:has-text('{reference_name}'), .cdk-overlay-pane button.asset-item:has-text('{base_name}')").first
-        if not target.is_visible():
-            target = self.page.locator(".cdk-overlay-pane button.asset-item").first
+        for rname in ref_names:
+            add_btn.click(force=True)
+            time.sleep(0.8)
+            base_name = os.path.splitext(os.path.basename(rname))[0]
+            target = self.page.locator(f".cdk-overlay-pane button.asset-item:has-text('{base_name}')").first
+            if not target.is_visible():
+                target = self.page.locator(f".cdk-overlay-pane button.asset-item:has-text('{rname}')").first
+            if not target.is_visible():
+                target = self.page.locator(".cdk-overlay-pane button.asset-item").first
 
-        if target.is_visible():
-            target.click(force=True)
-            time.sleep(0.5)
-            include_btn = self.page.locator("button:has-text('Incluir no comando')").first
-            if include_btn.is_visible():
-                include_btn.click(force=True)
+            if target.is_visible():
+                target.click(force=True)
                 time.sleep(0.5)
+                include_btn = self.page.locator("button:has-text('Incluir no comando')").first
+                if include_btn.is_visible() and include_btn.is_enabled():
+                    include_btn.click(force=True)
+                    time.sleep(0.5)
 
-        self.page.keyboard.press("Escape")
-        time.sleep(0.3)
-        print(f"[FlowEditor] Chip de referência anexado com sucesso: {reference_name}")
+            self.page.keyboard.press("Escape")
+            time.sleep(0.3)
 
-    def submit_prompt(self, prompt: str, model: str = "Nano Banana 2", aspect_ratio: str = "16:9", reference: Optional[str] = None):
+        active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+        print(f"[FlowEditor] {len(active_chips)} chip(s) de referência anexado(s) com sucesso!")
+
+    def attach_reference(self, reference: str):
+        """Anexa uma única referência visual (retrocompatibilidade)."""
+        self.attach_references([reference])
+
+    def attach_reference_from_library(self, reference_name: str = "character_reference.jpg"):
+        """Anexa um recurso de mídia existente da biblioteca do projeto como chip de referência."""
+        self.attach_references([reference_name])
+
+    def submit_prompt(self, prompt: str, model: str = "Nano Banana 2", aspect_ratio: str = "16:9", reference: Optional[Union[str, List[str]]] = None):
         """Insere o prompt diretamente no nó do ProseMirror e dispara a geração."""
         if reference:
-            self.attach_reference(reference)
+            if isinstance(reference, list):
+                self.attach_references(reference)
+            else:
+                self.attach_references([reference])
             
         self.verify_and_set_settings(model=model, aspect_ratio=aspect_ratio)
         
@@ -317,19 +338,27 @@ class FlowEditor:
         print("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")
         return False
 
-    def submit_batch_concurrent(self, prompts: list, model: str = "Nano Banana 2", aspect_ratio: str = "3:4", reference: Optional[str] = None, delay_between: float = 3.0) -> list:
-        """Submete uma lista de prompts em lote de forma concorrente, garantindo re-anexação rápida do chip a cada slide."""
+    def submit_batch_concurrent(
+        self,
+        prompts: list,
+        model: str = "Nano Banana 2",
+        aspect_ratio: str = "3:4",
+        reference: Optional[Union[str, List[str]]] = None,
+        delay_between: float = 3.0
+    ) -> list:
+        """Submete uma lista de prompts em lote de forma concorrente, garantindo re-anexação rápida de referências a cada slide."""
         if not prompts:
             raise ValueError("Lista de prompts não pode ser vazia.")
 
         self.verify_and_set_settings(model=model, aspect_ratio=aspect_ratio)
 
-        ref_name = None
+        # Prepara referências base
+        base_refs = []
         if reference:
-            if os.path.exists(reference):
-                ref_name = self.upload_reference_image(reference)
-            else:
-                ref_name = reference
+            base_refs = reference if isinstance(reference, list) else [reference]
+            for r in base_refs:
+                if os.path.exists(r):
+                    self.upload_reference_image(r)
 
         pm = self.page.locator(".ProseMirror").first
         if not pm.is_visible():
@@ -342,15 +371,18 @@ class FlowEditor:
             p_text = p_info if isinstance(p_info, str) else p_info.get("prompt", "")
             slide_id = i + 1 if isinstance(p_info, str) else p_info.get("slide", i + 1)
 
+            # Suporte a referências específicas por slide no manifesto
+            slide_refs = None
+            if isinstance(p_info, dict):
+                slide_refs = p_info.get("references") or ([p_info.get("reference")] if p_info.get("reference") else None)
+            if not slide_refs:
+                slide_refs = base_refs
+
             print(f"[FlowEditor] Disparando Slide {slide_id}/{len(prompts)}...")
 
-            # 1. Garante que o chip de referência esteja anexado (Flow limpa a cada envio)
-            if ref_name:
-                has_chip = self.page.evaluate("""() => {
-                    return document.querySelectorAll('button.chip-container, button[aria-label=\"Elemento\"]').length > 0;
-                }""")
-                if not has_chip:
-                    self.attach_reference(ref_name)
+            # 1. Garante que os chips de referência estejam anexados (Flow limpa a cada envio)
+            if slide_refs:
+                self.attach_references(slide_refs)
 
             # 2. Aguarda o botão de envio estar pronto/habilitado
             start_wait = time.time()

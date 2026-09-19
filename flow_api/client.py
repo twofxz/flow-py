@@ -10,7 +10,7 @@ from typing import Optional
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
-DEFAULT_PROFILE = r"C:\Users\FALA MUITO\.cache\chrome-devtools-mcp\chrome-profile"
+DEFAULT_PROFILE = os.path.expanduser(r"~/.google-flow/profile")
 CHROME_BIN = r"C:\Users\FALA MUITO\chrome\win64-153.0.8010.47\chrome-win64\chrome.exe"
 FLOW_BASE_URL = "https://flow.google.com"
 
@@ -32,7 +32,12 @@ class FlowClient:
         sock.close()
         
         if result != 0:
-            print("[FlowClient] Navegador não detectado na porta 9222. Iniciando processo...")
+            print("[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente...")
+            creationflags = 0
+            if os.name == 'nt':
+                # Cria processo desacoplado para sobreviver ao término do terminal Python
+                creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008  # DETACHED_PROCESS
+                
             cmd = [
                 CHROME_BIN,
                 "--remote-debugging-port=9222",
@@ -41,8 +46,34 @@ class FlowClient:
                 "--no-default-browser-check",
                 FLOW_BASE_URL
             ]
-            subprocess.Popen(cmd)
+            subprocess.Popen(cmd, creationflags=creationflags, close_fds=(os.name != 'nt'))
             time.sleep(3)
+
+    def get_cached_project_url(self) -> Optional[str]:
+        """Recupera o último projeto ativo do arquivo de cache para evitar criar projetos novos em branco."""
+        cache_file = os.path.join(DEFAULT_PROFILE, "active_project.json")
+        if os.path.exists(cache_file):
+            try:
+                import json
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("project_url")
+            except Exception:
+                pass
+        return None
+
+    def save_cached_project_url(self, url: str):
+        """Salva a URL do projeto ativo no cache."""
+        if "flow.google.com/project/" not in url:
+            return
+        cache_file = os.path.join(DEFAULT_PROFILE, "active_project.json")
+        try:
+            import json
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump({"project_url": url, "updated_at": time.time()}, f)
+        except Exception:
+            pass
 
     def connect(self) -> Page:
         """Conecta ao Chromium via CDP e sincroniza a aba do Google Flow."""
@@ -65,14 +96,17 @@ class FlowClient:
                     
         if not target_page:
             target_page = self.context.new_page()
-            target_page.goto(FLOW_BASE_URL)
-            target_page.wait_for_load_state("networkidle")
+            # Tenta reabrir o último projeto ativo para reaproveitar mídias enviadas
+            cached_url = self.get_cached_project_url()
+            target_url = cached_url if cached_url else FLOW_BASE_URL
+            target_page.goto(target_url, wait_until="domcontentloaded")
+            time.sleep(2)
             
         self.page = target_page
         self.page.bring_to_front()
         self.dismiss_modals()
         
-        # Se estiver na página inicial do Flow, clica em 'Novo projeto'
+        # Se estiver na página inicial do Flow e não houver projeto em cache, abre novo projeto
         if "flow.google.com/project" not in self.page.url:
             new_btn = self.page.locator("button:has-text('Novo projeto'), [aria-label*='Novo projeto']").first
             if new_btn.is_visible():
@@ -81,6 +115,9 @@ class FlowClient:
                 time.sleep(2.5)
                 self.dismiss_modals()
                 
+        if "flow.google.com/project" in self.page.url:
+            self.save_cached_project_url(self.page.url)
+            
         self.set_download_path(self.download_dir)
         return self.page
 
@@ -100,10 +137,13 @@ class FlowClient:
         """Garante que a visualização esteja no canvas principal fechando o visualizador se aberto."""
         if not self.page:
             return
-        concluir_btn = self.page.locator("button:has-text('Concluir')").first
-        if concluir_btn.is_visible():
-            concluir_btn.click()
+        done_btn = self.page.locator("button[aria-label='Edição concluída'], button:has-text('check'), button:has-text('Concluir')").first
+        if done_btn.is_visible():
+            done_btn.click()
             time.sleep(1.5)
+        else:
+            self.page.keyboard.press("Escape")
+            time.sleep(0.5)
 
     def set_download_path(self, path: str):
         """Configura dinamicamente a pasta de downloads via sessão CDP."""

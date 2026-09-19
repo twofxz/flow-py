@@ -207,15 +207,21 @@ class FlowDownloader:
         total_found = len(cards)
         print(f"[FlowDownloader] Total de {total_found} cards identificados no canvas.")
 
-        if total_found < count:
-            print(f"[FlowDownloader] Aviso: esperados {count} cards, mas encontrados {total_found}. Baixando disponíveis.")
-            target_cards = cards
-        else:
-            target_cards = cards[:count]
+        # O Google Flow gera por padrão 2 variações por prompt ('x2')
+        # Se total_found >= 2 * count, sabemos que cada slide gerou um par de cards
+        variations = 2 if total_found >= 2 * count else 1
+        if variations == 2:
+            print(f"[FlowDownloader] Detectado modo 'x2' do Flow ({total_found} cards para {count} slides). Mapeando variação principal de cada slide.")
 
-        # No Google Flow, o card mais recente fica no topo (index 0).
-        # Para salvar Slide 1 -> Slide N na ordem correta de criação, invertemos a lista dos top 'count' cards:
-        ordered_cards = list(reversed(target_cards))
+        ordered_cards = []
+        for i in range(count):
+            card_idx = (count - 1 - i) * variations
+            if card_idx < len(cards):
+                ordered_cards.append(cards[card_idx])
+
+        if not ordered_cards:
+            ordered_cards = list(reversed(cards[:count]))
+
         print(f"[FlowDownloader] Iniciando download de {len(ordered_cards)} slides ordenados (Slide 1 ao {len(ordered_cards)})...")
 
         downloaded_paths = []
@@ -236,7 +242,7 @@ class FlowDownloader:
                 # Retorna ao canvas para o próximo card
                 back = self.page.locator("button[aria-label*='Voltar'], button[aria-label*='voltar']").first
                 if back.is_visible():
-                    back.click()
+                    back.click(force=True)
                 else:
                     self.page.keyboard.press("Escape")
                 time.sleep(1.0)

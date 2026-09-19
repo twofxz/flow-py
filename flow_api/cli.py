@@ -23,6 +23,7 @@ def main():
     gen_parser.add_argument("--prompt", type=str, required=True, help="Prompt textual da imagem")
     gen_parser.add_argument("--reference", type=str, default=None, help="Nome do arquivo na biblioteca ou caminho da imagem local")
     gen_parser.add_argument("--reference-image", type=str, default=None, help="Alias para caminho da imagem de referência local")
+    gen_parser.add_argument("--references", nargs="+", default=None, help="Múltiplas imagens de referência (locais ou na biblioteca)")
     gen_parser.add_argument("--filename", type=str, default=None, help="Nome personalizado do arquivo salvo (ex: meu_personagem.jpeg)")
     gen_parser.add_argument("--model", type=str, default="Nano Banana 2", help="Modelo de geração")
     gen_parser.add_argument("--ratio", type=str, default="16:9", help="Proporção da imagem (16:9, 9:16, 1:1, 3:4)")
@@ -36,6 +37,7 @@ def main():
     vid_parser.add_argument("--duration", type=int, required=True, choices=[4, 6, 8, 10], help="Duração OBRIGATÓRIA do vídeo em segundos (4, 6, 8 ou 10)")
     vid_parser.add_argument("--reference", type=str, default=None, help="Nome do arquivo na biblioteca ou caminho da imagem local para I2V")
     vid_parser.add_argument("--reference-image", type=str, default=None, help="Alias para caminho da imagem de referência local")
+    vid_parser.add_argument("--references", nargs="+", default=None, help="Múltiplas imagens de referência para I2V")
     vid_parser.add_argument("--filename", type=str, default=None, help="Nome personalizado do vídeo salvo (ex: meu_video.mp4)")
     vid_parser.add_argument("--ratio", type=str, default="16:9", choices=["16:9", "9:16"], help="Proporção do vídeo (16:9 ou 9:16)")
     vid_parser.add_argument("--resolution", type=str, default="720p", choices=["720p"], help="Resolução do vídeo (estritamente 720p)")
@@ -47,6 +49,7 @@ def main():
     batch_parser.add_argument("--manifest", type=str, required=True, help="Caminho do arquivo JSON com os prompts")
     batch_parser.add_argument("--reference", type=str, default=None, help="Nome do arquivo de referência na biblioteca ou caminho local")
     batch_parser.add_argument("--reference-image", type=str, default=None, help="Alias para caminho local da referência")
+    batch_parser.add_argument("--references", nargs="+", default=None, help="Múltiplas imagens de referência para o lote")
     batch_parser.add_argument("--model", type=str, default="Nano Banana 2", choices=["Nano Banana 2", "Nano Banana Pro"], help="Modelo de imagem")
     batch_parser.add_argument("--ratio", type=str, default="3:4", help="Proporção da imagem (3:4, 16:9, 9:16, 1:1)")
     batch_parser.add_argument("--delay", type=float, default=3.0, help="Intervalo em segundos entre envios (padrão: 3.0s)")
@@ -83,7 +86,7 @@ def main():
 
         elif args.command == "generate":
             client.ensure_canvas()
-            ref = args.reference or args.reference_image
+            ref = args.references or args.reference or args.reference_image
             editor.submit_prompt(args.prompt, model=args.model, aspect_ratio=args.ratio, reference=ref)
             success = editor.wait_for_generation(timeout=args.timeout)
             if not success:
@@ -103,7 +106,7 @@ def main():
 
         elif args.command == "video":
             client.ensure_canvas()
-            ref = args.reference or args.reference_image
+            ref = args.references or args.reference or args.reference_image
             editor.submit_video_prompt(args.prompt, duration=args.duration, resolution=args.resolution, aspect_ratio=args.ratio, reference=ref)
             success = editor.wait_for_video_generation(timeout=args.timeout)
             if not success:
@@ -124,7 +127,7 @@ def main():
 
         elif args.command == "batch":
             client.ensure_canvas()
-            ref = args.reference or args.reference_image
+            ref = args.references or args.reference or args.reference_image
 
             if not os.path.exists(args.manifest):
                 print(json.dumps({"success": False, "error": f"Arquivo de manifest não encontrado: {args.manifest}"}))
