@@ -42,50 +42,82 @@ class FlowDownloader:
         return targets
 
     def download_current(self, resolution: str = "1K", filename: Optional[str] = None, timeout: int = 25) -> Optional[str]:
-        """Baixa a mídia ativa na tela na resolução nativa especificada."""
-        dl_btn = self.page.locator("button[aria-label='Baixar mídia']").first
-        if not dl_btn.is_visible():
+        """Baixa a mídia ativa na tela na resolução nativa especificada com fallback inteligente."""
+        default_downloads = os.path.expanduser(r"~\Downloads")
+        before_custom = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
+        before_default = set(os.listdir(default_downloads)) if os.path.exists(default_downloads) else set()
+
+        # 1. Clica no botão 'Baixar mídia' via JS injetado
+        clicked = self.page.evaluate("""() => {
+            const dlBtn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
+            );
+            if (!dlBtn) return false;
+            dlBtn.click();
+            return true;
+        }""")
+        
+        if not clicked:
             print("[FlowDownloader] Botão de download não visível na tela.")
             return None
-            
-        if dl_btn.get_attribute("aria-expanded") != "true":
-            dl_btn.click(force=True)
-            time.sleep(0.8)
-        
-        # Localiza o botão exato da resolução no menu
-        res_btn = self.page.locator(f"flow-menu-item button:has-text('{resolution}'), [role='menuitem']:has-text('{resolution}'), flow-menu button:has-text('{resolution}'), button:has-text('{resolution}')").first
-        if not res_btn.is_visible():
+
+        time.sleep(0.8)
+
+        # 2. Clica no item de resolução (1K / 2K) via JS
+        res_clicked = self.page.evaluate("""(res) => {
+            const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button, span'));
+            const target = menuItems.find(m => m.innerText && m.innerText.includes(res));
+            if (target) {
+                target.click();
+                return true;
+            }
+            const original = menuItems.find(m => m.innerText && (m.innerText.includes('Original') || m.innerText.includes('1K') || m.innerText.includes('2K')));
+            if (original) {
+                original.click();
+                return true;
+            }
+            return false;
+        }""", resolution)
+
+        if not res_clicked:
             print(f"[FlowDownloader] Resolução {resolution} não encontrada no menu.")
             self.page.keyboard.press("Escape")
             return None
-            
-        before_files = set(os.listdir(self.download_dir))
-        res_btn.click(force=True)
-        
-        # Aguarda o arquivo aparecer na pasta
+
+        # 3. Aguarda o arquivo aparecer na pasta (customizada ou padrão ~/Downloads)
         for _ in range(timeout):
             time.sleep(1)
-            after_files = set(os.listdir(self.download_dir))
-            diff = after_files - before_files
-            new_imgs = [f for f in diff if f.endswith(('.jpeg', '.jpg', '.png')) and not f.endswith('.crdownload')]
-            if new_imgs:
-                downloaded = new_imgs[0]
-                full_path = os.path.join(self.download_dir, downloaded)
-                
-                if filename:
-                    if not any(filename.lower().endswith(ext) for ext in ['.jpeg', '.jpg', '.png', '.webp']):
-                        ext = os.path.splitext(downloaded)[1]
-                        filename = f"{filename}{ext}"
-                    target_path = os.path.join(self.download_dir, filename)
-                    if os.path.exists(target_path):
-                        os.remove(target_path)
-                    os.rename(full_path, target_path)
-                    full_path = target_path
-                    downloaded = filename
-                    
-                print(f"[FlowDownloader] Arquivo baixado: {downloaded} ({os.path.getsize(full_path)} bytes)")
-                return full_path
-                
+            if os.path.exists(self.download_dir):
+                after_custom = set(os.listdir(self.download_dir))
+                diff_custom = after_custom - before_custom
+                new_imgs = [f for f in diff_custom if f.lower().endswith(('.jpeg', '.jpg', '.png', '.webp')) and not f.endswith('.crdownload')]
+                if new_imgs:
+                    full_path = os.path.join(self.download_dir, new_imgs[0])
+                    if filename:
+                        target_path = os.path.join(self.download_dir, filename)
+                        if os.path.exists(target_path):
+                            os.remove(target_path)
+                        os.rename(full_path, target_path)
+                        full_path = target_path
+                    print(f"[FlowDownloader] Arquivo baixado: {os.path.basename(full_path)} ({os.path.getsize(full_path)} bytes)")
+                    return full_path
+
+            if os.path.exists(default_downloads):
+                after_default = set(os.listdir(default_downloads))
+                diff_default = after_default - before_default
+                new_imgs_def = [f for f in diff_default if f.lower().endswith(('.jpeg', '.jpg', '.png', '.webp')) and not f.endswith('.crdownload')]
+                if new_imgs_def:
+                    src = os.path.join(default_downloads, new_imgs_def[0])
+                    target_name = filename or new_imgs_def[0]
+                    dest = os.path.join(self.download_dir, target_name)
+                    import shutil
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                    shutil.move(src, dest)
+                    print(f"[FlowDownloader] Arquivo capturado e movido: {target_name} ({os.path.getsize(dest)} bytes)")
+                    return dest
+
+        self.page.keyboard.press("Escape")
         return None
 
     def download_all_rail(self, resolution: str = "1K", max_items: Optional[int] = None) -> List[str]:
@@ -193,46 +225,46 @@ class FlowDownloader:
     def download_batch(self, count: int, filenames: Optional[List[str]] = None, resolution: str = "1K", timeout: int = 25) -> List[str]:
         """Baixa deterministamente os últimos `count` ativos gerados em lote na ordem correta (Slide 1 a N)."""
         # Garante retorno ao canvas
+        self.page.keyboard.press("Escape")
+        time.sleep(0.5)
         back_btn = self.page.locator("button[aria-label*='Voltar'], button[aria-label*='voltar']").first
         if back_btn.is_visible():
             back_btn.click()
             time.sleep(1)
 
-        # Localiza os cards de imagem gerados no canvas
-        cards = self.page.locator("img[alt*='Bloco mostrando'], img[alt*='Card showing'], img[alt*='Imagem']").all()
-        if not cards:
-            cards = [img for img in self.page.locator("img:not(.ghost-image)").all() 
-                     if img.bounding_box() and img.bounding_box()['width'] > 180]
+        # Identifica contêineres de cards no canvas via JS
+        tiles_count = self.page.evaluate("""() => {
+            const tiles = document.querySelectorAll('flow-grid-tile-container');
+            return tiles.length;
+        }""")
 
-        total_found = len(cards)
-        print(f"[FlowDownloader] Total de {total_found} cards identificados no canvas.")
-
-        # O Google Flow gera por padrão 2 variações por prompt ('x2')
-        # Se total_found >= 2 * count, sabemos que cada slide gerou um par de cards
-        variations = 2 if total_found >= 2 * count else 1
+        print(f"[FlowDownloader] Total de {tiles_count} cards identificados no canvas.")
+        variations = 2 if tiles_count >= 2 * count else 1
         if variations == 2:
-            print(f"[FlowDownloader] Detectado modo 'x2' do Flow ({total_found} cards para {count} slides). Mapeando variação principal de cada slide.")
-
-        ordered_cards = []
-        for i in range(count):
-            card_idx = (count - 1 - i) * variations
-            if card_idx < len(cards):
-                ordered_cards.append(cards[card_idx])
-
-        if not ordered_cards:
-            ordered_cards = list(reversed(cards[:count]))
-
-        print(f"[FlowDownloader] Iniciando download de {len(ordered_cards)} slides ordenados (Slide 1 ao {len(ordered_cards)})...")
+            print(f"[FlowDownloader] Detectado modo 'x2' do Flow ({tiles_count} cards para {count} slides). Mapeando variação principal de cada slide.")
 
         downloaded_paths = []
-        for idx, card in enumerate(ordered_cards):
+        for idx in range(count):
             custom_name = filenames[idx] if filenames and idx < len(filenames) else f"slide_{idx+1:02d}.jpeg"
-            print(f"[FlowDownloader] [{idx+1}/{len(ordered_cards)}] Abrindo card do Slide {idx+1} para salvar como '{custom_name}'...")
+            card_idx = (count - 1 - idx) * variations
+            print(f"[FlowDownloader] [{idx+1}/{count}] Abrindo card do Slide {idx+1} (card #{card_idx}) para salvar como '{custom_name}'...")
             try:
-                card.scroll_into_view_if_needed()
-                card.click(force=True)
-                time.sleep(1.5)
+                # Clica no container do card via JS
+                clicked = self.page.evaluate("""(idx) => {
+                    const tiles = document.querySelectorAll('flow-grid-tile-container');
+                    if (tiles[idx]) {
+                        tiles[idx].click();
+                        return true;
+                    }
+                    return false;
+                }""", card_idx)
 
+                if not clicked:
+                    imgs = self.page.locator("flow-grid-tile-container, img:not(.ghost-image)").all()
+                    if card_idx < len(imgs):
+                        imgs[card_idx].click(force=True)
+
+                time.sleep(1.8)
                 saved_path = self.download_current(resolution=resolution, filename=custom_name, timeout=timeout)
                 if saved_path:
                     downloaded_paths.append(saved_path)
@@ -240,12 +272,12 @@ class FlowDownloader:
                     print(f"[FlowDownloader] Falha ao baixar Slide {idx+1} ('{custom_name}').")
 
                 # Retorna ao canvas para o próximo card
+                self.page.keyboard.press("Escape")
+                time.sleep(0.5)
                 back = self.page.locator("button[aria-label*='Voltar'], button[aria-label*='voltar']").first
                 if back.is_visible():
                     back.click(force=True)
-                else:
-                    self.page.keyboard.press("Escape")
-                time.sleep(1.0)
+                time.sleep(0.8)
             except Exception as e:
                 print(f"[FlowDownloader] Erro ao processar Slide {idx+1}: {e}")
                 self.page.keyboard.press("Escape")

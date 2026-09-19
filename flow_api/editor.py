@@ -11,6 +11,7 @@ ALLOWED_IMAGE_MODELS = ["Nano Banana 2", "Nano Banana Pro"]
 class FlowEditor:
     def __init__(self, page: Page):
         self.page = page
+        self.uploaded_files = set()
 
     def verify_and_set_settings(self, model: str = "Nano Banana 2", aspect_ratio: str = "16:9"):
         """Garante que o modelo e o aspect ratio configurados sigam a política estrita."""
@@ -117,8 +118,13 @@ class FlowEditor:
         ref_names = []
         for ref in references:
             if os.path.exists(ref):
-                ref_name = self.upload_reference_image(ref)
-                ref_names.append(ref_name)
+                norm_ref = os.path.abspath(ref)
+                if norm_ref in self.uploaded_files:
+                    ref_names.append(os.path.basename(norm_ref))
+                else:
+                    ref_name = self.upload_reference_image(norm_ref)
+                    self.uploaded_files.add(norm_ref)
+                    ref_names.append(ref_name)
             else:
                 ref_names.append(ref)
                 
