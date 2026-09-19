@@ -54,6 +54,9 @@ def main():
     batch_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
     batch_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite total de renderização do lote")
 
+    # Comando: test-connection
+    test_parser = subparsers.add_parser("test-connection", help="Testa e valida conexão com a aba ativa do Google Flow")
+
     # Comando: download-all
     dl_parser = subparsers.add_parser("download-all", help="Baixa todas as imagens da galeria ativa")
     dl_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
@@ -61,14 +64,24 @@ def main():
     dl_parser.add_argument("--count", type=int, default=None, help="Número máximo de imagens a baixar")
 
     args = parser.parse_args()
-    client = FlowClient(download_dir=args.output_dir)
+    client = FlowClient(download_dir=getattr(args, "output_dir", None))
 
     try:
         page = client.connect()
         editor = FlowEditor(page)
         downloader = FlowDownloader(page, client.download_dir)
 
-        if args.command == "generate":
+        if args.command == "test-connection":
+            client.ensure_canvas()
+            print(json.dumps({
+                "success": True,
+                "status": "connected",
+                "flow_url": page.url,
+                "title": page.title()
+            }, indent=2))
+            return
+
+        elif args.command == "generate":
             client.ensure_canvas()
             ref = args.reference or args.reference_image
             editor.submit_prompt(args.prompt, model=args.model, aspect_ratio=args.ratio, reference=ref)
