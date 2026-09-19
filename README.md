@@ -60,6 +60,9 @@ flow generate \
   --resolution 1K
 ```
 
+> [!CAUTION]
+> **Safety Filter Notice (Zero Celebrity Names)**: Google Flow blocks any generation containing the name of a real famous person/celebrity. Even if the reference image is of a celebrity, always refer to them anonymously (e.g. *"This character"*, *"The person in the attached reference image"*). Never include real names in prompts.
+
 ### Generate Video (Text-to-Video & Image-to-Video)
 ```bash
 # Text-to-Video (T2V) - 4 seconds
