@@ -354,28 +354,54 @@ class FlowEditor:
 
     def wait_for_video_generation(self, timeout: int = 180) -> bool:
         """Aguarda reativamente o término da renderização de vídeo com monitoramento ativo de erros e políticas."""
-        print("[FlowEditor] Aguardando renderização do vídeo...")
-        time.sleep(6)
+        print("[FlowEditor] Aguardando início da renderização do vídeo...")
         start_time = time.time()
+
+        # 1. Aguarda início efetivo da renderização (até 15s)
+        time.sleep(3)
+        for _ in range(12):
+            err = self.check_error_alerts()
+            if err:
+                raise RuntimeError(f"Google Flow Error: {err}")
+
+            status = self.page.evaluate("""() => {
+                const text = document.body.innerText;
+                const hasProgress = text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role=\"progressbar\"]') !== null;
+                const tiles = document.querySelectorAll('flow-grid-tile-container');
+                const firstTileGenerating = tiles.length > 0 && !tiles[0].innerText.includes('play_circle') && (tiles[0].querySelector('[role=\"progressbar\"]') !== null || tiles[0].innerText.includes('%'));
+                return hasProgress || firstTileGenerating;
+            }""")
+            if status:
+                break
+            time.sleep(1)
+
+        print("[FlowEditor] Renderização em andamento. Monitorando conclusão...")
+        # 2. Loop de monitoramento até conclusão efetiva
         while time.time() - start_time < timeout:
             err = self.check_error_alerts()
             if err:
                 print(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
                 raise RuntimeError(f"Google Flow Error: {err}")
 
-            is_generating = self.page.evaluate("""() => {
+            state = self.page.evaluate("""() => {
                 const text = document.body.innerText;
-                return text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role=\"progressbar\"]') !== null;
+                const isGenerating = text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role=\"progressbar\"]') !== null;
+                const tiles = document.querySelectorAll('flow-grid-tile-container');
+                const firstTileReady = tiles.length > 0 && tiles[0].innerText.includes('play_circle');
+                return { isGenerating: isGenerating, firstTileReady: firstTileReady };
             }""")
-            if not is_generating:
-                elapsed = int(time.time() - start_time) + 6
+
+            if not state['isGenerating'] and state['firstTileReady']:
+                elapsed = int(time.time() - start_time)
                 print(f"[FlowEditor] Renderização de vídeo concluída com sucesso em {elapsed}s!")
-                time.sleep(2)
+                print("[FlowEditor] Aguardando estabilização do arquivo MP4 no CDN do Google (15s)...")
+                time.sleep(15)
                 return True
+
             time.sleep(3)
-            elapsed = int(time.time() - start_time) + 6
+            elapsed = int(time.time() - start_time)
             print(f"[FlowEditor] Renderizando vídeo... ({elapsed}s)")
-            
+
         print("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")
         return False
 

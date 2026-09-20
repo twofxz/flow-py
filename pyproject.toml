@@ -35,3 +35,7 @@ google-flow = "flow_api.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["flow_api*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

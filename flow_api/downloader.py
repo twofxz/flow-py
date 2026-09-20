@@ -13,48 +13,30 @@ class FlowDownloader:
         self.download_dir = download_dir
 
     def open_viewer(self, force_newest: bool = False):
-        """Abre o visualizador detalhado a partir do card mais recente do canvas (tiles[0])."""
-        if not force_newest:
-            if self.page.locator("button[aria-label='Baixar mídia']").is_visible() or self.page.locator(".rail-container").is_visible():
-                return
+        """Garante que o visualizador detalhado esteja aberto (seja na rota /edit/ ou via card do canvas)."""
+        if "/edit/" in self.page.url:
+            return
 
-        # Se já estiver em rota /edit/ ou viewer aberto e queremos o mais recente, volta ao canvas primeiro
-        if "/edit/" in self.page.url or self.page.locator("button[aria-label='Baixar mídia']").is_visible():
-            self.page.evaluate("""() => {
-                const backBtn = document.querySelector("button[aria-label*='Voltar'], button[aria-label*='Edição concluída'], button[aria-label*='Concluir']");
-                if (backBtn) backBtn.click();
-            }""")
-            self.page.keyboard.press("Escape")
-            time.sleep(1.5)
+        # 1. Caso esteja no canvas principal, clica no primeiro flow-grid-tile-container no canto superior esquerdo (evita botão play)
+        tile = self.page.locator("flow-grid-tile-container").first
+        try:
+            tile.wait_for(state="visible", timeout=8000)
+            tile.click(position={"x": 20, "y": 20})
+        except Exception:
+            pass
 
-        # 1. Tenta clicar no primeiro flow-grid-tile-container (card mais recente) via JS
-        clicked = self.page.evaluate("""() => {
-            const tiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
-            if (tiles.length > 0) {
-                tiles[0].click();
-                return true;
-            }
-            return false;
-        }""")
+        # Aguarda transição para /edit/
+        try:
+            self.page.wait_for_url("**/edit/**", timeout=8000)
+        except Exception:
+            pass
 
-        if clicked:
-            time.sleep(2)
-            if self.page.locator("button[aria-label='Baixar mídia']").is_visible():
-                return
-
-        # 2. Fallback para elementos video e img no topo
-        cards = self.page.locator("flow-video-tile, video, img:not(.ghost-image)").all()
-        for i in cards:
-            box = i.bounding_box()
-            if box and box['width'] > 150:
-                try:
-                    i.scroll_into_view_if_needed()
-                    i.click(force=True)
-                    time.sleep(2)
-                    if self.page.locator("button[aria-label='Baixar mídia']").is_visible():
-                        break
-                except Exception:
-                    continue
+        # Aguarda botão de download estar visível
+        try:
+            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar')").first
+            dl_btn.wait_for(state="visible", timeout=8000)
+        except Exception:
+            pass
 
     def get_rail_thumbnails(self) -> List[Dict]:
         """Identifica os botões de miniaturas disponíveis na barra superior do visualizador."""
@@ -73,44 +55,71 @@ class FlowDownloader:
         before_custom = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
         before_default = set(os.listdir(default_downloads)) if os.path.exists(default_downloads) else set()
 
-        # 1. Clica no botão 'Baixar mídia' via JS injetado
-        clicked = self.page.evaluate("""() => {
-            const dlBtn = Array.from(document.querySelectorAll('button')).find(b => 
-                b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
-            );
-            if (!dlBtn) return false;
-            dlBtn.click();
-            return true;
+        # 1. Clica no botão 'Baixar mídia' se o menu não estiver aberto
+        menu_open = self.page.evaluate("""() => {
+            const btn = document.querySelector("button[aria-label*='Baixar'], button:has-text('Baixar')");
+            return btn && btn.getAttribute('aria-expanded') === 'true';
         }""")
-        
-        if not clicked:
-            print("[FlowDownloader] Botão de download não visível na tela.")
-            return None
 
-        time.sleep(0.8)
+        if not menu_open:
+            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar')").first
+            try:
+                if dl_btn.is_visible():
+                    dl_btn.click(force=True)
+                else:
+                    self.page.evaluate("""() => {
+                        const btn = Array.from(document.querySelectorAll('button')).find(b => 
+                            b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
+                        );
+                        if (btn) btn.click();
+                    }""")
+            except Exception:
+                pass
+            time.sleep(0.8)
 
-        # 2. Clica no item de resolução (1K / 2K) via JS
-        res_clicked = self.page.evaluate("""(res) => {
-            const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button, span'));
-            const target = menuItems.find(m => m.innerText && m.innerText.includes(res));
-            if (target) {
-                target.click();
-                return true;
-            }
-            const original = menuItems.find(m => m.innerText && (m.innerText.includes('Original') || m.innerText.includes('1K') || m.innerText.includes('2K')));
-            if (original) {
-                original.click();
-                return true;
-            }
-            return false;
-        }""", resolution)
+        # 2. Localiza item de menu da resolução desejada
+        item_btn = self.page.locator(".cdk-overlay-container button, .cdk-overlay-container [role='menuitem']").filter(has_text=resolution).first
+        if not item_btn.is_visible():
+            item_btn = self.page.locator(".cdk-overlay-container button, .cdk-overlay-container [role='menuitem']").filter(has_text="1K").first
+        if not item_btn.is_visible():
+            item_btn = self.page.locator(".cdk-overlay-container button, .cdk-overlay-container [role='menuitem']").filter(has_text="Original").first
 
-        if not res_clicked:
-            print(f"[FlowDownloader] Resolução {resolution} não encontrada no menu.")
-            self.page.keyboard.press("Escape")
-            return None
+        # 3. Tenta download com expect_download nativo do Playwright
+        download_obj = None
+        try:
+            with self.page.expect_download(timeout=5000) as dl_info:
+                if item_btn.is_visible():
+                    item_btn.click()
+                else:
+                    self.page.evaluate("""(res) => {
+                        const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button'));
+                        const target = menuItems.find(m => m.innerText && (m.innerText.includes(res) || m.innerText.includes('Original') || m.innerText.includes('1K')));
+                        if (target) target.click();
+                    }""", resolution)
+            download_obj = dl_info.value
+        except Exception:
+            try:
+                if item_btn.is_visible():
+                    item_btn.click(force=True)
+            except Exception:
+                pass
 
-        # 3. Aguarda o arquivo aparecer na pasta (customizada ou padrão ~/Downloads)
+        if download_obj:
+            try:
+                suggested = download_obj.suggested_filename or "image.jpeg"
+                target_name = filename or suggested
+                dest = os.path.join(self.download_dir, target_name)
+                os.makedirs(self.download_dir, exist_ok=True)
+                if os.path.exists(dest):
+                    os.remove(dest)
+                download_obj.save_as(dest)
+                print(f"[FlowDownloader] Arquivo baixado via CDP: {target_name} ({os.path.getsize(dest)} bytes)")
+                self.page.keyboard.press("Escape")
+                return dest
+            except Exception:
+                pass
+
+        # 4. Monitora diretamente a pasta de download (caso Page.setDownloadBehavior tenha salvado no disco)
         for _ in range(timeout):
             time.sleep(1)
             if os.path.exists(self.download_dir):
@@ -125,7 +134,8 @@ class FlowDownloader:
                             os.remove(target_path)
                         os.rename(full_path, target_path)
                         full_path = target_path
-                    print(f"[FlowDownloader] Arquivo baixado: {os.path.basename(full_path)} ({os.path.getsize(full_path)} bytes)")
+                    print(f"[FlowDownloader] Arquivo capturado no disco: {os.path.basename(full_path)} ({os.path.getsize(full_path)} bytes)")
+                    self.page.keyboard.press("Escape")
                     return full_path
 
             if os.path.exists(default_downloads):
@@ -140,7 +150,8 @@ class FlowDownloader:
                     if os.path.exists(dest):
                         os.remove(dest)
                     shutil.move(src, dest)
-                    print(f"[FlowDownloader] Arquivo capturado e movido: {target_name} ({os.path.getsize(dest)} bytes)")
+                    print(f"[FlowDownloader] Arquivo capturado em Downloads e movido: {target_name} ({os.path.getsize(dest)} bytes)")
+                    self.page.keyboard.press("Escape")
                     return dest
 
         self.page.keyboard.press("Escape")
@@ -167,90 +178,115 @@ class FlowDownloader:
             
         return downloaded_paths
 
-    def download_video(self, resolution: str = "720p", filename: Optional[str] = None, timeout: int = 30) -> Optional[str]:
-        """Baixa o vídeo ativo no visualizador no formato nativo MP4."""
-        self.open_viewer(force_newest=True)
-        # 1. Clica no botão Baixar mídia via JS
-        clicked = self.page.evaluate("""() => {
-            const dlBtn = Array.from(document.querySelectorAll('button')).find(b => 
-                b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
-            );
-            if (!dlBtn) return false;
-            dlBtn.click();
-            return true;
-        }""")
-        if not clicked:
-            print("[FlowDownloader] Botão de download de vídeo não visível.")
-            return None
+    def download_video(self, resolution: str = "720p", filename: Optional[str] = None, timeout: int = 40) -> Optional[str]:
+        """Baixa o vídeo ativo no visualizador no formato nativo MP4 com detecção dual (CDP e disco)."""
+        self.open_viewer()
 
-        time.sleep(0.8)
-
-        before_files = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
-        default_downloads = os.path.expanduser(r"~\Downloads")
-        before_default = set(os.listdir(default_downloads)) if os.path.exists(default_downloads) else set()
-
-        # 2. Clica na opção de resolução via JS (720p padrão)
+        target_name = filename
         print(f"[FlowDownloader] Selecionando resolução {resolution}...")
-        res_clicked = self.page.evaluate("""(res) => {
-            const items = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button, span'));
-            const target = items.find(m => m.innerText && m.innerText.includes(res));
-            if (target) {
-                target.click();
-                return true;
-            }
-            const fallback = items.find(m => m.innerText && (m.innerText.includes('MP4') || m.innerText.includes('720p') || m.innerText.includes('Original')));
-            if (fallback) {
-                fallback.click();
-                return true;
-            }
-            return false;
-        }""", resolution)
 
-        if not res_clicked:
-            print(f"[FlowDownloader] Opção {resolution} não encontrada no menu.")
-            self.page.keyboard.press("Escape")
-            return None
+        dl_btn = self.page.locator("button[aria-label*='Baixar mídia'], button[aria-label*='Baixar']").first
+        try:
+            dl_btn.wait_for(state="visible", timeout=8000)
+        except Exception:
+            self.open_viewer()
 
-        # 3. Monitora o surgimento do arquivo de vídeo no sistema de arquivos
-        for _ in range(timeout):
-            time.sleep(1)
-            after_files = set(os.listdir(self.download_dir))
-            diff = after_files - before_files
-            new_vids = [f for f in diff if f.endswith(('.mp4', '.mov', '.webm')) and not f.endswith('.crdownload')]
-            if new_vids:
-                downloaded = new_vids[0]
-                full_path = os.path.join(self.download_dir, downloaded)
-                
-                if filename:
-                    if not any(filename.lower().endswith(ext) for ext in ['.mp4', '.mov', '.webm']):
-                        ext = os.path.splitext(downloaded)[1] or '.mp4'
-                        filename = f"{filename}{ext}"
-                    target_path = os.path.join(self.download_dir, filename)
-                    if os.path.exists(target_path):
-                        os.remove(target_path)
-                    os.rename(full_path, target_path)
-                    full_path = target_path
-                    downloaded = filename
-                    
-                print(f"[FlowDownloader] Vídeo baixado com sucesso: {downloaded} ({os.path.getsize(full_path)} bytes)")
+        for attempt in range(1, 4):
+            if attempt > 1:
+                print(f"[FlowDownloader] Tentativa {attempt}/3 de download do vídeo em {resolution}...")
                 self.page.keyboard.press("Escape")
-                return full_path
-                
-            after_default = set(os.listdir(default_downloads))
-            diff_def = after_default - before_default
-            new_vids_def = [f for f in diff_def if f.endswith(('.mp4', '.mov', '.webm')) and not f.endswith('.crdownload')]
-            if new_vids_def:
-                src = os.path.join(default_downloads, new_vids_def[0])
-                target_name = filename or new_vids_def[0]
-                if not target_name.lower().endswith(('.mp4', '.mov', '.webm')):
-                    target_name = f"{target_name}.mp4"
-                dest = os.path.join(self.download_dir, target_name)
-                import shutil
-                shutil.move(src, dest)
-                print(f"[FlowDownloader] Vídeo movido com sucesso: {target_name} ({os.path.getsize(dest)} bytes)")
-                self.page.keyboard.press("Escape")
-                return dest
-                
+                time.sleep(1.0)
+                self.open_viewer()
+
+            before_files = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
+
+            # 1. Verifica se menu de download já está aberto
+            menu_open = self.page.evaluate("""() => {
+                const btn = document.querySelector("button[aria-label*='Baixar mídia'], button[aria-label*='Baixar']");
+                return btn && btn.getAttribute('aria-expanded') === 'true';
+            }""")
+
+            if not menu_open:
+                dl_btn = self.page.locator("button[aria-label*='Baixar mídia'], button[aria-label*='Baixar']").first
+                try:
+                    dl_btn.click(force=True)
+                except Exception:
+                    self.page.evaluate("""() => {
+                        const btn = document.querySelector("button[aria-label*='Baixar mídia'], button[aria-label*='Baixar']");
+                        if (btn) btn.click();
+                    }""")
+
+            # 2. Localiza e aguarda o botão da resolução no overlay
+            item_btn = self.page.locator(".cdk-overlay-container button").filter(has_text=resolution).first
+            try:
+                item_btn.wait_for(state="visible", timeout=4000)
+            except Exception:
+                item_btn = self.page.locator(".cdk-overlay-container button").filter(has_text="720p").first
+
+            # 3. Dispara o clique com captura dual
+            download_obj = None
+            try:
+                with self.page.expect_download(timeout=5000) as dl_info:
+                    item_btn.click()
+                download_obj = dl_info.value
+            except Exception:
+                try:
+                    item_btn.click(force=True)
+                except Exception:
+                    pass
+
+            # Caso A: Capturado via Playwright expect_download
+            if download_obj:
+                suggested = download_obj.suggested_filename or "video.mp4"
+                final_name = target_name or suggested
+                if not any(final_name.lower().endswith(ext) for ext in ['.mp4', '.mov', '.webm']):
+                    ext = os.path.splitext(suggested)[1] or '.mp4'
+                    final_name = f"{final_name}{ext}"
+                dest = os.path.join(self.download_dir, final_name)
+                os.makedirs(self.download_dir, exist_ok=True)
+
+                try:
+                    temp_path = download_obj.path()
+                    if temp_path and os.path.exists(temp_path):
+                        import shutil
+                        if os.path.exists(dest):
+                            os.remove(dest)
+                        shutil.copy2(temp_path, dest)
+                        size = os.path.getsize(dest)
+                        if size > 50000:
+                            print(f"[FlowDownloader] Vídeo baixado com sucesso via CDP: {final_name} ({size} bytes)")
+                            self.page.keyboard.press("Escape")
+                            return dest
+                except Exception as e:
+                    print(f"[FlowDownloader] Erro ao salvar arquivo via CDP: {e}")
+
+            # Caso B: Capturado diretamente no disco (Page.setDownloadBehavior nativo do Chrome)
+            for _ in range(15):
+                time.sleep(1)
+                after_files = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
+                diff = after_files - before_files
+                new_vids = [f for f in diff if f.lower().endswith(('.mp4', '.mov', '.webm')) and not f.endswith('.crdownload')]
+                if new_vids:
+                    downloaded = new_vids[0]
+                    full_path = os.path.join(self.download_dir, downloaded)
+                    size = os.path.getsize(full_path)
+                    if size > 50000:
+                        if target_name:
+                            final_name = target_name
+                            if not any(final_name.lower().endswith(ext) for ext in ['.mp4', '.mov', '.webm']):
+                                final_name = f"{final_name}.mp4"
+                            dest = os.path.join(self.download_dir, final_name)
+                            if os.path.exists(dest):
+                                os.remove(dest)
+                            os.rename(full_path, dest)
+                            full_path = dest
+                            downloaded = final_name
+                        print(f"[FlowDownloader] Vídeo salvo com sucesso no disco: {downloaded} ({size} bytes)")
+                        self.page.keyboard.press("Escape")
+                        return full_path
+
+            time.sleep(attempt * 2)
+
         self.page.keyboard.press("Escape")
         return None
 
