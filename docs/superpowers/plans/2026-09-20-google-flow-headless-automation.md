@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+, Playwright (CDP attach), Chrome DevTools Protocol, FastMCP / MCPServer, FastAPI, Windows WMI / POSIX subprocess.
 
-**Spec:** [notebooklm-like silent automation specification](file:///C:/Users/FALA%20MUITO/Downloads/google-flow-api/README.md)
+**Spec:** [notebooklm-like silent automation specification](README.md)
 
 ## Global Constraints
 - Chrome must run invisibly by default with `--headless=new`, without flashing or stealing OS focus.
@@ -217,7 +217,7 @@ git commit -m "feat: add fast JSON auth-check matching notebooklm standard"
 
 **Files:**
 - Test Script: `tests/test_live_headless_generation.py`
-- Outputs: `C:\Users\FALA MUITO\Downloads\google_flow_assets\`
+- Outputs: `~/Downloads/google_flow_assets/`
 
 **Interfaces:**
 - Consumes: running background headless Chrome on port 9222.
@@ -237,8 +237,8 @@ Verify the MP4 file is downloaded and verified `> 500 KB`.
 
 **Files:**
 - Modify: `README.md`
-- Modify: `C:\Users\FALA MUITO\.gemini\config\skills\google-flow-media\SKILL.md`
-- Modify: `C:\Users\FALA MUITO\.codex\skills\google-flow-media\SKILL.md`
+- Modify: `~/.gemini/config/skills/google-flow-media/SKILL.md`
+- Modify: `~/.codex/skills/google-flow-media/SKILL.md`
 
 **Interfaces:**
 - Consumes: updated engine and CLI options.
