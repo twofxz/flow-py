@@ -85,11 +85,12 @@ def detect_session(session: Optional[str] = None) -> str:
     return "default"
 
 class FlowClient:
-    def __init__(self, cdp_url: str = DEFAULT_CDP_URL, download_dir: Optional[str] = None, session: Optional[str] = None):
+    def __init__(self, cdp_url: str = DEFAULT_CDP_URL, download_dir: Optional[str] = None, session: Optional[str] = None, headless: bool = True):
         self.cdp_url = cdp_url
         self.download_dir = download_dir or os.environ.get("FLOW_DOWNLOAD_DIR", os.path.expanduser(r"~\Downloads\google_flow_assets"))
         os.makedirs(self.download_dir, exist_ok=True)
         self.session = detect_session(session)
+        self.headless = headless
         
         self._playwright = None
         self.browser: Optional[Browser] = None
@@ -104,34 +105,34 @@ class FlowClient:
         
         if result != 0:
             chrome_bin = find_chrome_executable()
-            print(f"[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente ({chrome_bin})...")
+            mode_desc = "HEADLESS (invisível)" if self.headless else "VISIBLE (com janela)"
+            print(f"[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente em modo {mode_desc} ({chrome_bin})...")
+            
+            flags = [
+                '--remote-debugging-port=9222',
+                f'--user-data-dir="{DEFAULT_PROFILE}"',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
+                '--window-size=1920,1080'
+            ]
+            if self.headless:
+                flags.extend([
+                    '--headless=new',
+                    '--enable-gpu',
+                    '--use-gl=angle'
+                ])
+
             if os.name == 'nt':
                 # Usa WMI (Win32_Process) no Windows para desacoplar totalmente do Job Object do terminal
-                cmd_line = (
-                    f'"{chrome_bin}" '
-                    f'--remote-debugging-port=9222 '
-                    f'--user-data-dir="{DEFAULT_PROFILE}" '
-                    f'--no-first-run '
-                    f'--no-default-browser-check '
-                    f'--disable-background-timer-throttling '
-                    f'--disable-backgrounding-occluded-windows '
-                    f'--disable-renderer-backgrounding '
-                    f'"{FLOW_BASE_URL}"'
-                )
+                flags_str = " ".join(flags)
+                cmd_line = f'"{chrome_bin}" {flags_str} "{FLOW_BASE_URL}"'
                 ps_script = f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine = '{cmd_line}'}}"
                 subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True)
             else:
-                cmd = [
-                    chrome_bin,
-                    "--remote-debugging-port=9222",
-                    f"--user-data-dir={DEFAULT_PROFILE}",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    FLOW_BASE_URL
-                ]
+                cmd = [chrome_bin] + [f.strip('"') for f in flags] + [FLOW_BASE_URL]
                 subprocess.Popen(cmd, start_new_session=True, close_fds=True)
             time.sleep(3)
 
@@ -259,7 +260,15 @@ class FlowClient:
             time.sleep(1.5)
 
         self.page = target_page
-        self.page.bring_to_front()
+        try:
+            self.page.set_viewport_size({"width": 1920, "height": 1080})
+        except Exception:
+            pass
+        if not self.headless:
+            try:
+                self.page.bring_to_front()
+            except Exception:
+                pass
         self.dismiss_modals()
 
         # Se estiver na página inicial do Flow e não em um projeto, clica em Novo Projeto
