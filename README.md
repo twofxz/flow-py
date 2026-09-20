@@ -13,12 +13,15 @@
 ## ✨ Features
 
 - **🤖 Multi-Agent Ready (Claude, Codex, Antigravity, OpenCode, Cursor)**: Plug directly via native **MCP Protocol**, **Skill markdown**, or **CLI**.
+- **🤫 Silent Background Engine (Headless-by-Default)**: Operates 100% invisibly in background with zero window pop-ups (parity with `/notebooklm`). Chrome runs in `--headless=new` with Full HD 1920x1080 viewport and WebGL acceleration. Use `--head` whenever you want visual inspection.
+- **⚡ Sub-Second Auth Check (`auth-check`)**: Instantly verifies authenticated state and project readiness in sub-second JSON response.
+- **🛑 Safe Lifecycle Control (`google-flow stop`)**: Safely shuts down the background headless browser and frees up RAM/CPU, strictly isolating port 9222 and never terminating personal browsing windows.
 - **⚡ Fast CLI (`google-flow generate` & `google-flow video`)**: Instant generation in 20-30s with structured JSON output.
 - **🎬 Native Video Support (Gemini Omni Flash 1.1)**: Text-to-Video and Image-to-Video with strictly validated durations (`4s`, `6s`, `8s`, `10s`) and native 720p MP4 download.
 - **👤 Hyper-Consistent Characters (Multi-Reference)**: Upload up to 3 reference images (front, left profile, right profile) attached directly as ProseMirror chips.
 - **🔄 Concurrent Batch & Carousels (`batch`)**: Dispatches multi-slide prompts with a 3-second interval, generating 8-10 slides in parallel in ~1 minute.
 - **🔌 OpenAI Compatible Server (`google-flow serve`)**: Local FastAPI endpoint emulating `POST /v1/images/generations` for **n8n**, **Dify**, **LangChain**, or custom frontends.
-- **💎 Native Original Quality**: Injected CDP downloads preserving full uncompressed 1K/2K images and 720p MP4 videos.
+- **💎 Native Original Quality**: Dual detection (CDP + filesystem interception) preserving full uncompressed 1K/2K images and 720p MP4 videos.
 - **🌐 Cross-Platform Auto-Detection**: Dynamic `ChromeResolver` for Windows, macOS, and Linux with persistent Google account authentication.
 - **🛡️ Safety & Policy Guard**: Proactively catches Google Flow community guideline warnings, daily quota caps, and content blocks.
 
@@ -39,21 +42,42 @@ uv sync
 
 ---
 
-## 🔑 One-Time Login Setup
+## 🔑 Authentication & Background Lifecycle
 
-Run the interactive onboarding command to log into your Google Account:
+### 1. One-Time Login (Visible Browser)
+Run the onboarding command to log into your Google Account once:
 ```bash
 google-flow login
 ```
-1. A dedicated browser window will open in `https://flow.google.com`.
+1. A visible Chrome window opens at `https://flow.google.com`.
 2. Log into your Google Account and accept terms of service if this is your first visit.
 3. Press `[ENTER]` in your terminal to confirm.
-Your authenticated profile will be saved permanently in `~/.google-flow/profile`.
+Your authenticated session is permanently stored in `~/.google-flow/profile`.
 
-To verify your connection anytime:
+### 2. Fast Auth Check (Sub-Second JSON)
+Verify that your session is ready without launching or opening any window:
 ```bash
-google-flow status
+google-flow auth-check --json
 ```
+Output:
+```json
+{
+  "authenticated": true,
+  "status": "ready",
+  "url": "https://flow.google.com/project/...",
+  "session": "antigravity",
+  "profile_dir": "C:\\Users\\...\\.google-flow\\profile"
+}
+```
+
+### 3. Graceful Background Shutdown
+When finished generating, close the background headless instance and release RAM/CPU:
+```bash
+google-flow stop
+# or
+google-flow down
+```
+*(Only shuts down the dedicated port 9222 instance; your personal Chrome windows are never touched!)*
 
 ---
 
