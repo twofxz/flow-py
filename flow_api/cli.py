@@ -85,11 +85,22 @@ def main():
     dl_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     dl_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     dl_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
-    dl_parser.add_argument("--count", type=int, default=None, help="Número máximo de imagens a baixar")
+    # Comando: stop / down (daemon shutdown)
+    stop_parser = subparsers.add_parser("stop", help="Encerra com segurança instâncias em segundo plano do Chromium na porta 9222")
+    down_parser = subparsers.add_parser("down", help="Alias para 'stop'")
 
     args = parser.parse_args()
 
     # Roteamento especial para comandos que gerenciam seus próprios ciclos
+    if args.command in ["stop", "down"]:
+        client = FlowClient()
+        stopped = client.stop_background_process()
+        if stopped:
+            print("🛑 Processo em segundo plano do Google Flow encerrado com sucesso.")
+        else:
+            print("ℹ️ Nenhum processo ativo do Google Flow encontrado para encerrar.")
+        return
+
     if args.command == "serve":
         import uvicorn
         from .server import app

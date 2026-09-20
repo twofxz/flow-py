@@ -374,3 +374,21 @@ class FlowClient:
         if self._playwright:
             self._playwright.stop()
             self._playwright = None
+
+    def stop_background_process(self) -> bool:
+        """Encerra com segurança instâncias do Chromium em background associadas à porta 9222 ou perfil do Flow."""
+        self.close()
+        stopped = False
+        if os.name == 'nt':
+            ps_script = (
+                "$procs = Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | "
+                "Where-Object { $_.CommandLine -like '*remote-debugging-port=9222*' -or $_.CommandLine -like '*.google-flow*' }; "
+                "foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force; Write-Host 'Stopped PID' $p.ProcessId }"
+            )
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
+            if "Stopped PID" in (res.stdout or ""):
+                stopped = True
+        else:
+            res = subprocess.run(["pkill", "-f", "remote-debugging-port=9222"], capture_output=True)
+            stopped = (res.returncode == 0)
+        return stopped
