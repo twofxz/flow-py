@@ -40,9 +40,9 @@ downloads_output/
 # Local outputs & scratch scripts
 outputs/
 flow_outputs/
-test_*.py
-check_*.py
-dump_*.py
-get_*.py
-inspect_*.py
-generate_*.py
+/test_*.py
+/check_*.py
+/dump_*.py
+/get_*.py
+/inspect_*.py
+/generate_*.py
