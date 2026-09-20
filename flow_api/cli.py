@@ -11,10 +11,7 @@ from .client import FlowClient
 from .editor import FlowEditor
 from .downloader import FlowDownloader
 
-def main():
-    if sys.stdout.encoding != 'utf-8':
-        sys.stdout.reconfigure(encoding='utf-8')
-
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Google Flow Automation Engine CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -31,6 +28,7 @@ def main():
     gen_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     gen_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução nativa de download")
     gen_parser.add_argument("--timeout", type=int, default=90, help="Tempo limite de geração em segundos")
+    gen_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: video
     vid_parser = subparsers.add_parser("video", help="Gera vídeos no Google Flow usando Gemini Omni Flash 1.1")
@@ -45,6 +43,7 @@ def main():
     vid_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     vid_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     vid_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite de geração em segundos")
+    vid_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: batch (geração concorrente rápida - 3s delay)
     batch_parser = subparsers.add_parser("batch", help="Gera múltiplos slides concorrentemente (delay inteligente de 3s por prompt)")
@@ -59,6 +58,7 @@ def main():
     batch_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     batch_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
     batch_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite total de renderização do lote")
+    batch_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: login (onboarding)
     login_parser = subparsers.add_parser("login", help="Inicia o navegador dedicado para login interativo com a conta Google")
@@ -67,6 +67,12 @@ def main():
     # Comando: status / doctor
     status_parser = subparsers.add_parser("status", help="Diagnostica a conexão, perfil, autenticação e projeto ativo do Google Flow")
     status_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente")
+    status_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
+
+    # Comando: auth-check (padrão notebooklm rápido)
+    auth_parser = subparsers.add_parser("auth-check", help="Verifica rapidamente a autenticação e estado da sessão (padrão notebooklm)")
+    auth_parser.add_argument("--json", action="store_true", help="Retorna o resultado formatado em JSON")
+    auth_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente")
 
     # Comando: serve (OpenAI-compatible FastAPI)
     serve_parser = subparsers.add_parser("serve", help="Inicia a API local compatível com OpenAI (POST /v1/images/generations)")
@@ -79,16 +85,26 @@ def main():
     # Comando: test-connection
     test_parser = subparsers.add_parser("test-connection", help="Testa e valida conexão com a aba ativa do Google Flow")
     test_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
+    test_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: download-all
     dl_parser = subparsers.add_parser("download-all", help="Baixa todas as imagens da galeria ativa")
     dl_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     dl_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     dl_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
+    dl_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
+
     # Comando: stop / down (daemon shutdown)
     stop_parser = subparsers.add_parser("stop", help="Encerra com segurança instâncias em segundo plano do Chromium na porta 9222")
     down_parser = subparsers.add_parser("down", help="Alias para 'stop'")
 
+    return parser
+
+def main():
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout.reconfigure(encoding='utf-8')
+
+    parser = build_parser()
     args = parser.parse_args()
 
     # Roteamento especial para comandos que gerenciam seus próprios ciclos
@@ -113,7 +129,35 @@ def main():
         mcp_main()
         return
 
-    client = FlowClient(download_dir=getattr(args, "output_dir", None), session=getattr(args, "session", None))
+    if args.command == "auth-check":
+        client = FlowClient(session=getattr(args, "session", None), headless=True)
+        try:
+            client.start_browser_if_needed()
+            auth = client.check_auth_status()
+            if getattr(args, "json", False):
+                print(json.dumps(auth, indent=2))
+            else:
+                if auth.get("authenticated"):
+                    print("✅ Autenticado: Sim")
+                    print(f"🔗 Projeto: {auth.get('url')}")
+                    print(f"📁 Perfil: {auth.get('profile_dir')}")
+                else:
+                    print("❌ Não autenticado. Execute 'google-flow login' para iniciar a sessão.")
+                    if auth.get("error"):
+                        print(f"Detalhes: {auth.get('error')}")
+            if not auth.get("authenticated"):
+                sys.exit(1)
+        finally:
+            client.close()
+        return
+
+    is_login = args.command == "login"
+    headless = False if is_login else not getattr(args, "head", False)
+    client = FlowClient(
+        download_dir=getattr(args, "output_dir", None),
+        session=getattr(args, "session", None),
+        headless=headless
+    )
 
     try:
         if args.command == "login":
