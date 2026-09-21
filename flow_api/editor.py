@@ -116,18 +116,7 @@ class FlowEditor:
         if not references:
             return
             
-        ref_names = []
-        for ref in references:
-            if os.path.exists(ref):
-                norm_ref = os.path.abspath(ref)
-                if norm_ref in self.uploaded_files:
-                    ref_names.append(os.path.basename(norm_ref))
-                else:
-                    ref_name = self.upload_reference_image(norm_ref)
-                    self.uploaded_files.add(norm_ref)
-                    ref_names.append(ref_name)
-            else:
-                ref_names.append(ref)
+        ref_paths = references if isinstance(references, list) else [references]
                 
         # 1. Limpa chips pré-existentes na barra de comando
         chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
@@ -148,29 +137,63 @@ class FlowEditor:
         if not add_btn.is_visible():
             raise RuntimeError("Botão de adicionar elementos à caixa de comando não visível!")
 
-        for rname in ref_names:
+        for ref in ref_paths:
+            base_name = os.path.splitext(os.path.basename(ref))[0]
+            is_file = os.path.exists(ref)
+
+            # Abre o popover 'Adicionar elementos'
             add_btn.click(force=True)
             time.sleep(0.8)
-            base_name = os.path.splitext(os.path.basename(rname))[0]
-            target = self.page.locator(f".cdk-overlay-pane button.asset-item:has-text('{base_name}')").first
+
+            overlay = self.page.locator(".cdk-overlay-pane").first
+            if not overlay.is_visible():
+                raise RuntimeError("Overlay de seleção de elementos não abriu!")
+
+            # Procura item existente na lista
+            target = overlay.locator(f".asset-item:has-text('{base_name}')").first
+            if not target.is_visible() and is_file:
+                # Faz upload diretamente via botão Enviar mídia do próprio overlay
+                upload_btn = overlay.locator("button:has-text('Enviar mídia'), button:has-text('Enviar')").first
+                if upload_btn.is_visible():
+                    log(f"[FlowEditor] Enviando arquivo de referência: {os.path.basename(ref)}...")
+                    with self.page.expect_file_chooser(timeout=8000) as fc_info:
+                        upload_btn.click()
+                    fc_info.value.set_files(os.path.abspath(ref))
+                    
+                    # Aguarda término do upload (status 'Enviando' sumir)
+                    start_wait = time.time()
+                    while time.time() - start_wait < 30:
+                        target = overlay.locator(f".asset-item:has-text('{base_name}')").first
+                        if target.is_visible():
+                            text = target.inner_text()
+                            if "Enviando" not in text and "Carregando" not in text:
+                                break
+                        time.sleep(1)
+
             if not target.is_visible():
-                target = self.page.locator(f".cdk-overlay-pane button.asset-item:has-text('{rname}')").first
+                target = overlay.locator(f".asset-item:has-text('{os.path.basename(ref)}')").first
             if not target.is_visible():
-                target = self.page.locator(".cdk-overlay-pane button.asset-item").first
+                target = overlay.locator(".asset-item").first
 
             if target.is_visible():
-                target.click(force=True)
-                time.sleep(0.5)
-                include_btn = self.page.locator("button:has-text('Incluir no comando')").first
-                if include_btn.is_visible() and include_btn.is_enabled():
+                classes = target.get_attribute("class") or ""
+                if "asset-item-active" not in classes:
+                    target.click(force=True)
+                    time.sleep(0.5)
+
+                include_btn = overlay.locator("button:has-text('Incluir no comando'), .detail-add-to-prompt").first
+                if include_btn.is_visible() and not include_btn.is_disabled():
                     include_btn.click(force=True)
                     time.sleep(0.5)
 
             self.page.keyboard.press("Escape")
             time.sleep(0.3)
 
+        # Validação estrita: chips PRECISAM estar presentes na barra de comando
         active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
-        log(f"[FlowEditor] {len(active_chips)} chip(s) de referência anexado(s) com sucesso!")
+        if len(active_chips) == 0:
+            raise RuntimeError(f"FALHA CRÍTICA: Chip de referência não foi anexado à barra de comando para '{references}'! Abortando geração para evitar perda de consistência.")
+        log(f"[FlowEditor] {len(active_chips)} chip(s) de referência anexado(s) e validados com sucesso!")
 
     def attach_reference(self, reference: str):
         """Anexa uma única referência visual (retrocompatibilidade)."""
@@ -195,18 +218,21 @@ class FlowEditor:
             raise RuntimeError("Caixa de comando (.ProseMirror) não encontrada no canvas!")
             
         pm.click()
+        time.sleep(0.2)
+        self.page.keyboard.press("Control+A")
+        self.page.keyboard.press("Backspace")
+        time.sleep(0.1)
+
+        self.page.keyboard.type(prompt)
         time.sleep(0.3)
         
-        # Injeção confiável com disparo de evento DOM input
-        pm.evaluate("(el, text) => { el.innerText = text; el.dispatchEvent(new Event('input', { bubbles: true })); }", prompt)
-        pm.click()
-        flow_page_keyboard = self.page.keyboard
-        flow_page_keyboard.press("End")
-        flow_page_keyboard.type(" ")
-        flow_page_keyboard.press("Backspace")
-        time.sleep(0.5)
+        # Validação estrita se referência foi solicitada
+        if reference:
+            active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+            if len(active_chips) == 0:
+                raise RuntimeError("FALHA CRÍTICA: O chip de referência desapareceu antes do disparo da geração!")
         
-        submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button:has-text('arrow_forward')").first
+        submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button.generate-icon-button, button:has-text('arrow_forward')").first
         submit_btn.click()
         log("[FlowEditor] Prompt enviado com sucesso!")
 
@@ -470,14 +496,14 @@ class FlowEditor:
             self.page.keyboard.press("Backspace")
             time.sleep(0.1)
 
-            pm.evaluate("""(el, text) => {
-                el.innerText = text;
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-            }""", p_text)
-            self.page.keyboard.press("End")
-            self.page.keyboard.type(" ")
-            self.page.keyboard.press("Backspace")
+            self.page.keyboard.type(p_text)
             time.sleep(0.3)
+
+            # Validação estrita de persistência do chip antes de enviar
+            if slide_refs:
+                active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+                if len(active_chips) == 0:
+                    raise RuntimeError(f"FALHA CRÍTICA: Chip de referência desapareceu antes do envio do Slide {slide_id}!")
 
             # 4. Clica no botão de iniciar geração
             submit_btn.click(force=True)

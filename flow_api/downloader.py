@@ -184,10 +184,21 @@ class FlowDownloader:
         # 5. Fallback final: extrai imagem em alta resolução diretamente do DOM via requisição autenticada
         try:
             img_src = self.page.evaluate("""() => {
-                const img = Array.from(document.querySelectorAll('img')).find(i => 
-                    i.src && (i.src.includes('flow-content.google') || i.src.includes('flow.google.com/asb/') || (i.className && i.className.includes('image')))
-                );
-                return img ? img.src : null;
+                // 1. Tenta visualizador detalhado se aberto
+                const viewerImg = document.querySelector('.main-view img, .media-viewer img, .asset-detail-viewer img');
+                if (viewerImg && viewerImg.src && !viewerImg.src.startsWith('data:') && !viewerImg.closest('.chip-container')) {
+                    return viewerImg.src;
+                }
+
+                // 2. Busca no card gerado mais recente do canvas (ignora estritamente chips da barra de comando e sidebar)
+                const canvasTiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
+                for (const tile of canvasTiles) {
+                    const img = tile.querySelector('img');
+                    if (img && img.src && !img.src.startsWith('data:') && !img.closest('.chip-container, .prompt-box, .sidebar')) {
+                        return img.src;
+                    }
+                }
+                return null;
             }""")
             if img_src:
                 if "flow-content.google" in img_src:
