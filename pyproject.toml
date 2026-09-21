@@ -28,6 +28,11 @@ dependencies = [
     "mcp>=1.0.0"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0"
+]
+
 [project.scripts]
 flow = "flow_api.cli:main"
 google-flow = "flow_api.cli:main"
