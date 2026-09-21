@@ -116,27 +116,45 @@ class FlowDownloader:
                 if os.path.exists(dest):
                     os.remove(dest)
                 download_obj.save_as(dest)
-                print(f"[FlowDownloader] Arquivo baixado via CDP: {target_name} ({os.path.getsize(dest)} bytes)")
-                self.page.keyboard.press("Escape")
-                return dest
+                size = os.path.getsize(dest) if os.path.exists(dest) else 0
+                if size > 1000:
+                    print(f"[FlowDownloader] Arquivo baixado via CDP: {target_name} ({size} bytes)")
+                    self.page.keyboard.press("Escape")
+                    return dest
+                else:
+                    # Remove placeholder de 0 bytes
+                    if os.path.exists(dest):
+                        os.remove(dest)
             except Exception:
                 pass
 
-        # 4. Monitora diretamente a pasta de download (caso Page.setDownloadBehavior tenha salvado no disco)
+        # 4. Monitora diretamente a pasta de download (caso Page.setDownloadBehavior tenha salvo no disco)
         for _ in range(timeout):
             time.sleep(1)
             if os.path.exists(self.download_dir):
                 after_custom = set(os.listdir(self.download_dir))
                 diff_custom = after_custom - before_custom
-                new_imgs = [f for f in diff_custom if f.lower().endswith(('.jpeg', '.jpg', '.png', '.webp')) and not f.endswith('.crdownload')]
+                new_imgs = [
+                    f for f in diff_custom
+                    if f.lower().endswith(('.jpeg', '.jpg', '.png', '.webp'))
+                    and not f.endswith('.crdownload')
+                    and os.path.getsize(os.path.join(self.download_dir, f)) > 1000
+                ]
                 if new_imgs:
+                    new_imgs.sort(key=lambda f: os.path.getmtime(os.path.join(self.download_dir, f)), reverse=True)
                     full_path = os.path.join(self.download_dir, new_imgs[0])
                     if filename:
                         target_path = os.path.join(self.download_dir, filename)
                         if os.path.exists(target_path):
                             os.remove(target_path)
-                        os.rename(full_path, target_path)
-                        full_path = target_path
+                        try:
+                            os.replace(full_path, target_path)
+                            full_path = target_path
+                        except Exception:
+                            import shutil
+                            shutil.copy2(full_path, target_path)
+                            os.remove(full_path)
+                            full_path = target_path
                     print(f"[FlowDownloader] Arquivo capturado no disco: {os.path.basename(full_path)} ({os.path.getsize(full_path)} bytes)")
                     self.page.keyboard.press("Escape")
                     return full_path
@@ -144,7 +162,12 @@ class FlowDownloader:
             if os.path.exists(default_downloads):
                 after_default = set(os.listdir(default_downloads))
                 diff_default = after_default - before_default
-                new_imgs_def = [f for f in diff_default if f.lower().endswith(('.jpeg', '.jpg', '.png', '.webp')) and not f.endswith('.crdownload')]
+                new_imgs_def = [
+                    f for f in diff_default
+                    if f.lower().endswith(('.jpeg', '.jpg', '.png', '.webp'))
+                    and not f.endswith('.crdownload')
+                    and os.path.getsize(os.path.join(default_downloads, f)) > 1000
+                ]
                 if new_imgs_def:
                     src = os.path.join(default_downloads, new_imgs_def[0])
                     target_name = filename or new_imgs_def[0]
@@ -156,6 +179,28 @@ class FlowDownloader:
                     print(f"[FlowDownloader] Arquivo capturado em Downloads e movido: {target_name} ({os.path.getsize(dest)} bytes)")
                     self.page.keyboard.press("Escape")
                     return dest
+
+        # 5. Fallback final: extrai imagem em alta resolução diretamente do DOM via requisição autenticada
+        try:
+            img_src = self.page.evaluate("""() => {
+                const img = document.querySelector('img[src*="flow.google.com/asb/"], img.image');
+                return img ? img.src : null;
+            }""")
+            if img_src:
+                high_res_url = img_src.split("=")[0] + "=s0"
+                target_name = filename or f"flow_image_{int(time.time())}.jpeg"
+                dest = os.path.join(self.download_dir, target_name)
+                resp = self.page.request.get(high_res_url)
+                if resp.status == 200:
+                    body = resp.body()
+                    if len(body) > 1000:
+                        with open(dest, "wb") as f:
+                            f.write(body)
+                        print(f"[FlowDownloader] Imagem extraída em alta resolução via sessão autenticada: {target_name} ({len(body)} bytes)")
+                        self.page.keyboard.press("Escape")
+                        return dest
+        except Exception:
+            pass
 
         self.page.keyboard.press("Escape")
         return None
