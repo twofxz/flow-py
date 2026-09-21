@@ -10,6 +10,7 @@ import json
 from .client import FlowClient
 from .editor import FlowEditor
 from .downloader import FlowDownloader
+from .logger import log
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Google Flow Automation Engine CLI")
@@ -28,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     gen_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução nativa de download")
     gen_parser.add_argument("--timeout", type=int, default=90, help="Tempo limite de geração em segundos")
+    gen_parser.add_argument("--json", action="store_true", help="Retorna saída formatada em JSON")
     gen_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: video
@@ -43,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     vid_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     vid_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     vid_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite de geração em segundos")
+    vid_parser.add_argument("--json", action="store_true", help="Retorna saída formatada em JSON")
     vid_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: batch (geração concorrente rápida - 3s delay)
@@ -58,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     batch_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
     batch_parser.add_argument("--timeout", type=int, default=180, help="Tempo limite total de renderização do lote")
+    batch_parser.add_argument("--json", action="store_true", help="Retorna saída formatada em JSON")
     batch_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: login (onboarding)
@@ -92,6 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
     dl_parser.add_argument("--session", type=str, default=None, help="Identificador da sessão/agente (ex: antigravity, codex)")
     dl_parser.add_argument("--output-dir", type=str, default=None, help="Pasta de destino dos arquivos")
     dl_parser.add_argument("--resolution", type=str, default="1K", choices=["1K", "2K"], help="Resolução de download")
+    dl_parser.add_argument("--count", type=int, default=None, help="Número máximo de itens para baixar")
+    dl_parser.add_argument("--json", action="store_true", help="Retorna o resultado formatado em JSON")
     dl_parser.add_argument("--head", action="store_true", help="Executa com navegador visível para depuração")
 
     # Comando: stop / down (daemon shutdown)
@@ -101,8 +107,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 def main():
-    if sys.stdout.encoding != 'utf-8':
+    if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
 
     parser = build_parser()
     args = parser.parse_args()
@@ -187,6 +195,7 @@ def main():
                 print(f"🔗 Projeto ativo: {auth.get('url')}")
                 print(f"📁 Perfil salvo em: {auth.get('profile_dir')}")
                 print("\nVocê não precisa fazer login novamente. O sistema está 100% pronto para gerar imagens e vídeos!")
+                client.stop_background_process()
                 return
 
             print("\n👉 O navegador foi aberto na página do Google Flow.")
@@ -205,9 +214,11 @@ def main():
                 print(f"🔗 Projeto ativo: {auth.get('url')}")
                 print(f"📁 Perfil salvo em: {auth.get('profile_dir')}")
                 print("\nPronto para gerar imagens e vídeos via CLI, MCP ou Python API!")
+                client.stop_background_process()
             else:
                 print("\n⚠️ Não foi possível confirmar o login:")
                 print(json.dumps(auth, indent=2))
+                client.stop_background_process()
             return
 
         elif args.command == "status":
@@ -242,14 +253,16 @@ def main():
 
             downloader.open_viewer()
             saved_file = downloader.download_current(resolution=args.resolution, filename=args.filename)
+            abs_saved_file = os.path.abspath(saved_file) if saved_file else None
+            abs_output_dir = os.path.abspath(client.download_dir) if client.download_dir else None
             print(json.dumps({
                 "success": True,
                 "session": client.session,
                 "model": args.model,
                 "ratio": args.ratio,
                 "reference": ref,
-                "downloaded_file": saved_file,
-                "output_dir": client.download_dir
+                "downloaded_file": abs_saved_file,
+                "output_dir": abs_output_dir
             }, indent=2))
 
         elif args.command == "video":
@@ -262,6 +275,8 @@ def main():
                 sys.exit(1)
 
             saved_file = downloader.download_video(resolution=args.resolution, filename=args.filename)
+            abs_saved_file = os.path.abspath(saved_file) if saved_file else None
+            abs_output_dir = os.path.abspath(client.download_dir) if client.download_dir else None
             print(json.dumps({
                 "success": True,
                 "session": client.session,
@@ -270,8 +285,8 @@ def main():
                 "ratio": args.ratio,
                 "resolution": args.resolution,
                 "reference": ref,
-                "downloaded_file": saved_file,
-                "output_dir": client.download_dir
+                "downloaded_file": abs_saved_file,
+                "output_dir": abs_output_dir
             }, indent=2))
 
         elif args.command == "batch":
@@ -303,7 +318,7 @@ def main():
                 print(json.dumps({"success": False, "error": "Formato de manifest inválido. Deve ser uma lista de prompts ou um dict com 'slides'."}))
                 sys.exit(1)
 
-            print(f"[FlowCLI] Iniciando lote concorrente com {len(prompts)} slides (delay de {args.delay}s por prompt)...")
+            log(f"[FlowCLI] Iniciando lote concorrente com {len(prompts)} slides (delay de {args.delay}s por prompt)...")
             submitted = editor.submit_batch_concurrent(
                 prompts,
                 model=args.model,
@@ -323,24 +338,29 @@ def main():
                 resolution=args.resolution
             )
 
+            abs_downloaded = [os.path.abspath(f) for f in downloaded]
+            abs_output_dir = os.path.abspath(client.download_dir) if client.download_dir else None
             print(json.dumps({
                 "success": True,
                 "session": client.session,
                 "type": "batch",
-                "total_slides": len(downloaded),
+                "total_slides": len(abs_downloaded),
                 "model": args.model,
                 "ratio": args.ratio,
                 "reference": ref,
-                "downloaded_files": downloaded,
-                "output_dir": client.download_dir
+                "downloaded_files": abs_downloaded,
+                "output_dir": abs_output_dir
             }, indent=2))
 
         elif args.command == "download-all":
             files = downloader.download_all_rail(resolution=args.resolution, max_items=args.count)
+            abs_files = [os.path.abspath(f) for f in files]
+            abs_output_dir = os.path.abspath(client.download_dir) if client.download_dir else None
             print(json.dumps({
                 "success": True,
-                "downloaded_count": len(files),
-                "files": files
+                "downloaded_count": len(abs_files),
+                "files": abs_files,
+                "output_dir": abs_output_dir
             }, indent=2))
 
     finally:

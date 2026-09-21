@@ -1,3 +1,4 @@
+from .logger import log
 """
 FlowDownloader - Recupera ativos gerados em resolução nativa original (1K/2K).
 """
@@ -21,7 +22,7 @@ class FlowDownloader:
         tile = self.page.locator("flow-grid-tile-container").first
         try:
             tile.wait_for(state="visible", timeout=8000)
-            tile.click(position={"x": 20, "y": 20})
+            tile.click()
         except Exception:
             pass
 
@@ -118,7 +119,7 @@ class FlowDownloader:
                 download_obj.save_as(dest)
                 size = os.path.getsize(dest) if os.path.exists(dest) else 0
                 if size > 1000:
-                    print(f"[FlowDownloader] Arquivo baixado via CDP: {target_name} ({size} bytes)")
+                    log(f"[FlowDownloader] Arquivo baixado via CDP: {target_name} ({size} bytes)")
                     self.page.keyboard.press("Escape")
                     return dest
                 else:
@@ -155,7 +156,7 @@ class FlowDownloader:
                             shutil.copy2(full_path, target_path)
                             os.remove(full_path)
                             full_path = target_path
-                    print(f"[FlowDownloader] Arquivo capturado no disco: {os.path.basename(full_path)} ({os.path.getsize(full_path)} bytes)")
+                    log(f"[FlowDownloader] Arquivo capturado no disco: {os.path.basename(full_path)} ({os.path.getsize(full_path)} bytes)")
                     self.page.keyboard.press("Escape")
                     return full_path
 
@@ -176,31 +177,40 @@ class FlowDownloader:
                     if os.path.exists(dest):
                         os.remove(dest)
                     shutil.move(src, dest)
-                    print(f"[FlowDownloader] Arquivo capturado em Downloads e movido: {target_name} ({os.path.getsize(dest)} bytes)")
+                    log(f"[FlowDownloader] Arquivo capturado em Downloads e movido: {target_name} ({os.path.getsize(dest)} bytes)")
                     self.page.keyboard.press("Escape")
                     return dest
 
         # 5. Fallback final: extrai imagem em alta resolução diretamente do DOM via requisição autenticada
         try:
             img_src = self.page.evaluate("""() => {
-                const img = document.querySelector('img[src*="flow.google.com/asb/"], img.image');
+                const img = Array.from(document.querySelectorAll('img')).find(i => 
+                    i.src && (i.src.includes('flow-content.google') || i.src.includes('flow.google.com/asb/') || (i.className && i.className.includes('image')))
+                );
                 return img ? img.src : null;
             }""")
             if img_src:
-                high_res_url = img_src.split("=")[0] + "=s0"
+                if "flow-content.google" in img_src:
+                    high_res_url = img_src
+                elif "=s" in img_src:
+                    high_res_url = img_src.split("=")[0] + "=s0"
+                else:
+                    high_res_url = img_src
+
                 target_name = filename or f"flow_image_{int(time.time())}.jpeg"
                 dest = os.path.join(self.download_dir, target_name)
+                os.makedirs(self.download_dir, exist_ok=True)
                 resp = self.page.request.get(high_res_url)
                 if resp.status == 200:
                     body = resp.body()
                     if len(body) > 1000:
                         with open(dest, "wb") as f:
                             f.write(body)
-                        print(f"[FlowDownloader] Imagem extraída em alta resolução via sessão autenticada: {target_name} ({len(body)} bytes)")
+                        log(f"[FlowDownloader] Imagem extraída em alta resolução via sessão autenticada: {target_name} ({len(body)} bytes)")
                         self.page.keyboard.press("Escape")
                         return dest
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"[FlowDownloader] Fallback download error: {e}")
 
         self.page.keyboard.press("Escape")
         return None
@@ -212,10 +222,10 @@ class FlowDownloader:
             thumbnails = thumbnails[:max_items]
             
         downloaded_paths = []
-        print(f"[FlowDownloader] Iniciando download de {len(thumbnails)} ativos em {resolution}...")
+        log(f"[FlowDownloader] Iniciando download de {len(thumbnails)} ativos em {resolution}...")
         
         for idx, thumb in enumerate(thumbnails):
-            print(f"[FlowDownloader] [{idx+1}/{len(thumbnails)}] Selecionando '{thumb['aria']}'...")
+            log(f"[FlowDownloader] [{idx+1}/{len(thumbnails)}] Selecionando '{thumb['aria']}'...")
             thumb['element'].click()
             time.sleep(1.2)
             
@@ -231,7 +241,7 @@ class FlowDownloader:
         self.open_viewer()
 
         target_name = filename
-        print(f"[FlowDownloader] Selecionando resolução {resolution}...")
+        log(f"[FlowDownloader] Selecionando resolução {resolution}...")
 
         dl_btn = self.page.locator("button[aria-label*='Baixar mídia'], button[aria-label*='Baixar']").first
         try:
@@ -241,7 +251,7 @@ class FlowDownloader:
 
         for attempt in range(1, 4):
             if attempt > 1:
-                print(f"[FlowDownloader] Tentativa {attempt}/3 de download do vídeo em {resolution}...")
+                log(f"[FlowDownloader] Tentativa {attempt}/3 de download do vídeo em {resolution}...")
                 self.page.keyboard.press("Escape")
                 time.sleep(1.0)
                 self.open_viewer()
@@ -302,11 +312,11 @@ class FlowDownloader:
                         shutil.copy2(temp_path, dest)
                         size = os.path.getsize(dest)
                         if size > 50000:
-                            print(f"[FlowDownloader] Vídeo baixado com sucesso via CDP: {final_name} ({size} bytes)")
+                            log(f"[FlowDownloader] Vídeo baixado com sucesso via CDP: {final_name} ({size} bytes)")
                             self.page.keyboard.press("Escape")
                             return dest
                 except Exception as e:
-                    print(f"[FlowDownloader] Erro ao salvar arquivo via CDP: {e}")
+                    log(f"[FlowDownloader] Erro ao salvar arquivo via CDP: {e}")
 
             # Caso B: Capturado diretamente no disco (Page.setDownloadBehavior nativo do Chrome)
             for _ in range(15):
@@ -329,7 +339,7 @@ class FlowDownloader:
                             os.rename(full_path, dest)
                             full_path = dest
                             downloaded = final_name
-                        print(f"[FlowDownloader] Vídeo salvo com sucesso no disco: {downloaded} ({size} bytes)")
+                        log(f"[FlowDownloader] Vídeo salvo com sucesso no disco: {downloaded} ({size} bytes)")
                         self.page.keyboard.press("Escape")
                         return full_path
 
@@ -354,16 +364,16 @@ class FlowDownloader:
             return tiles.length;
         }""")
 
-        print(f"[FlowDownloader] Total de {tiles_count} cards identificados no canvas.")
+        log(f"[FlowDownloader] Total de {tiles_count} cards identificados no canvas.")
         variations = 2 if tiles_count >= 2 * count else 1
         if variations == 2:
-            print(f"[FlowDownloader] Detectado modo 'x2' do Flow ({tiles_count} cards para {count} slides). Mapeando variação principal de cada slide.")
+            log(f"[FlowDownloader] Detectado modo 'x2' do Flow ({tiles_count} cards para {count} slides). Mapeando variação principal de cada slide.")
 
         downloaded_paths = []
         for idx in range(count):
             custom_name = filenames[idx] if filenames and idx < len(filenames) else f"slide_{idx+1:02d}.jpeg"
             card_idx = (count - 1 - idx) * variations
-            print(f"[FlowDownloader] [{idx+1}/{count}] Abrindo card do Slide {idx+1} (card #{card_idx}) para salvar como '{custom_name}'...")
+            log(f"[FlowDownloader] [{idx+1}/{count}] Abrindo card do Slide {idx+1} (card #{card_idx}) para salvar como '{custom_name}'...")
             try:
                 # Clica no container do card via JS
                 clicked = self.page.evaluate("""(idx) => {
@@ -385,7 +395,7 @@ class FlowDownloader:
                 if saved_path:
                     downloaded_paths.append(saved_path)
                 else:
-                    print(f"[FlowDownloader] Falha ao baixar Slide {idx+1} ('{custom_name}').")
+                    log(f"[FlowDownloader] Falha ao baixar Slide {idx+1} ('{custom_name}').")
 
                 # Retorna ao canvas para o próximo card
                 self.page.keyboard.press("Escape")
@@ -395,10 +405,10 @@ class FlowDownloader:
                     back.click(force=True)
                 time.sleep(0.8)
             except Exception as e:
-                print(f"[FlowDownloader] Erro ao processar Slide {idx+1}: {e}")
+                log(f"[FlowDownloader] Erro ao processar Slide {idx+1}: {e}")
                 self.page.keyboard.press("Escape")
                 time.sleep(1.0)
 
-        print(f"[FlowDownloader] Concluído download de {len(downloaded_paths)}/{count} arquivos do lote com ordem determinística garantida!")
+        log(f"[FlowDownloader] Concluído download de {len(downloaded_paths)}/{count} arquivos do lote com ordem determinística garantida!")
         return downloaded_paths
 

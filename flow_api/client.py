@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
 import sys
 import shutil
+from .logger import log
 
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 FLOW_HOME = os.environ.get("FLOW_HOME", os.path.expanduser("~/.google-flow"))
@@ -33,9 +34,7 @@ def find_chrome_executable() -> str:
         user_profile = os.environ.get("USERPROFILE", "")
 
         candidates = [
-            # Instalação portátil ou local se configurada
-            os.path.join(user_profile, r"chrome\win64-153.0.8010.47\chrome-win64\chrome.exe"),
-            # Google Chrome padrão
+            # Google Chrome padrão (prioridade máxima)
             os.path.join(program_files, r"Google\Chrome\Application\chrome.exe"),
             os.path.join(program_files_x86, r"Google\Chrome\Application\chrome.exe"),
             os.path.join(local_app_data, r"Google\Chrome\Application\chrome.exe"),
@@ -45,6 +44,9 @@ def find_chrome_executable() -> str:
             # Microsoft Edge
             os.path.join(program_files, r"Microsoft\Edge\Application\msedge.exe"),
             os.path.join(program_files_x86, r"Microsoft\Edge\Application\msedge.exe"),
+            # Instalação portátil ou local como fallback
+            os.path.join(user_profile, r"chrome\win64-153.0.8010.47\chrome-win64\chrome.exe"),
+            os.path.join(user_profile, r"AppData\Local\Chromium\Application\chrome.exe"),
         ]
     elif sys.platform == 'darwin':
         candidates = [
@@ -102,12 +104,30 @@ class FlowClient:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = sock.connect_ex(('127.0.0.1', 9222))
         sock.close()
-        
+
+        mode_file = os.path.join(DEFAULT_PROFILE, "running_mode.txt")
+        current_mode = None
+        if os.path.exists(mode_file):
+            try:
+                with open(mode_file, "r", encoding="utf-8") as f:
+                    current_mode = f.read().strip()
+            except Exception:
+                pass
+
+        desired_mode = "headless" if self.headless else "visible"
+
+        # Se a porta está aberta, mas o modo ativo difere do solicitado (ex: estava visível do login e agora é headless), encerra e reinicia no modo correto!
+        if result == 0 and current_mode and current_mode != desired_mode:
+            log(f"[FlowClient] Navegador ativo em modo '{current_mode}', mas o comando requer '{desired_mode}'. Reiniciando processo...")
+            self.stop_background_process()
+            time.sleep(1)
+            result = 1
+
         if result != 0:
             chrome_bin = find_chrome_executable()
             mode_desc = "HEADLESS (invisível)" if self.headless else "VISIBLE (com janela)"
-            print(f"[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente em modo {mode_desc} ({chrome_bin})...")
-            
+            log(f"[FlowClient] Navegador não detectado na porta 9222. Iniciando processo persistente em modo {mode_desc} ({chrome_bin})...")
+
             flags = [
                 '--remote-debugging-port=9222',
                 f'--user-data-dir="{DEFAULT_PROFILE}"',
@@ -134,6 +154,14 @@ class FlowClient:
             else:
                 cmd = [chrome_bin] + [f.strip('"') for f in flags] + [FLOW_BASE_URL]
                 subprocess.Popen(cmd, start_new_session=True, close_fds=True)
+
+            try:
+                os.makedirs(DEFAULT_PROFILE, exist_ok=True)
+                with open(mode_file, "w", encoding="utf-8") as f:
+                    f.write(desired_mode)
+            except Exception:
+                pass
+
             time.sleep(3)
 
     def get_cached_project_url(self) -> Optional[str]:
@@ -222,7 +250,7 @@ class FlowClient:
                     page_session = page.evaluate("() => window.__flow_session__ || ''")
                     if page_session == self.session and not self.is_tab_busy(page):
                         target_page = page
-                        print(f"[FlowClient] Conectado à aba dedicada existente da sessão '{self.session}'.")
+                        log(f"[FlowClient] Conectado à aba dedicada existente da sessão '{self.session}'.")
                         break
                 except Exception:
                     pass
@@ -232,7 +260,7 @@ class FlowClient:
             for page in self.context.pages:
                 if cached_url in page.url and not self.is_tab_busy(page):
                     target_page = page
-                    print(f"[FlowClient] Conectado à aba com o projeto da sessão: {page.url}")
+                    log(f"[FlowClient] Conectado à aba com o projeto da sessão: {page.url}")
                     break
 
         # Estratégia 3: Procura QUALQUER aba existente de projeto no Flow que esteja LIVRE (não ocupada)
@@ -240,7 +268,7 @@ class FlowClient:
             for page in self.context.pages:
                 if "flow.google.com/project" in page.url and not self.is_tab_busy(page):
                     target_page = page
-                    print(f"[FlowClient] Acessando outra aba livre existente no navegador: {page.url}")
+                    log(f"[FlowClient] Acessando outra aba livre existente no navegador: {page.url}")
                     break
 
         # Estratégia 4: Procura aba na home do flow.google.com que esteja livre
@@ -248,12 +276,12 @@ class FlowClient:
             for page in self.context.pages:
                 if "flow.google.com" in page.url and not self.is_tab_busy(page):
                     target_page = page
-                    print(f"[FlowClient] Conectado à aba do Google Flow livre.")
+                    log(f"[FlowClient] Conectado à aba do Google Flow livre.")
                     break
 
         # Estratégia 5: Se TODAS as abas estiverem ocupadas ou nenhuma existir, abre nova aba imediatamente
         if not target_page:
-            print(f"[FlowClient] Nenhuma aba livre detectada. Criando nova aba ultra-rápida para '{self.session}'...")
+            log(f"[FlowClient] Nenhuma aba livre detectada. Criando nova aba ultra-rápida para '{self.session}'...")
             target_page = self.context.new_page()
             target_url = cached_url if cached_url else FLOW_BASE_URL
             target_page.goto(target_url, wait_until="domcontentloaded")
@@ -275,7 +303,7 @@ class FlowClient:
         if "flow.google.com/project" not in self.page.url:
             new_btn = self.page.locator("button:has-text('Novo projeto'), [aria-label*='Novo projeto']").first
             if new_btn.is_visible():
-                print(f"[FlowClient] Abrindo novo projeto no Flow para '{self.session}'...")
+                log(f"[FlowClient] Abrindo novo projeto no Flow para '{self.session}'...")
                 new_btn.click()
                 time.sleep(2.0)
                 self.dismiss_modals()
@@ -378,6 +406,12 @@ class FlowClient:
     def stop_background_process(self) -> bool:
         """Encerra com segurança instâncias do Chromium em background associadas à porta 9222 ou perfil do Flow."""
         self.close()
+        mode_file = os.path.join(DEFAULT_PROFILE, "running_mode.txt")
+        if os.path.exists(mode_file):
+            try:
+                os.remove(mode_file)
+            except Exception:
+                pass
         stopped = False
         if os.name == 'nt':
             ps_script = (

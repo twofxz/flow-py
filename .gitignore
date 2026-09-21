@@ -40,6 +40,7 @@ downloads_output/
 *.swp
 
 # Local outputs & scratch scripts
+output/
 outputs/
 flow_outputs/
 /test_*.py

@@ -1,3 +1,4 @@
+from .logger import log
 import os
 import time
 from typing import Optional, List, Union, Dict
@@ -22,7 +23,7 @@ class FlowEditor:
         if settings_btn.is_visible():
             text = settings_btn.inner_text()
             safe_text = text.encode('ascii', errors='replace').decode('ascii')
-            print(f"[FlowEditor] Configurações ativas no canvas: {repr(safe_text)}")
+            log(f"[FlowEditor] Configurações ativas no canvas: {repr(safe_text)}")
             
             # Formata chave de busca do ratio (ex: 9:16 -> crop_9_16)
             ratio_key = aspect_ratio.replace(":", "_")
@@ -50,7 +51,7 @@ class FlowEditor:
             if ratio_btn.is_visible():
                 ratio_btn.click()
                 time.sleep(0.5)
-                print(f"[FlowEditor] Proporção alterada para {aspect_ratio}")
+                log(f"[FlowEditor] Proporção alterada para {aspect_ratio}")
                     
             # 3. Altera modelo se necessário
             curr_model = self.page.locator("button[aria-label='Selecionar família de modelos']").first
@@ -61,7 +62,7 @@ class FlowEditor:
                 if model_opt.is_visible():
                     model_opt.click()
                     time.sleep(0.5)
-                    print(f"[FlowEditor] Modelo alterado para {model}")
+                    log(f"[FlowEditor] Modelo alterado para {model}")
                     
             self.page.keyboard.press("Escape")
             time.sleep(0.5)
@@ -87,7 +88,7 @@ class FlowEditor:
         if not enviar_btn.is_visible():
             raise RuntimeError("Opção 'Enviar' não encontrada no menu de mídia!")
             
-        print(f"[FlowEditor] Realizando upload nativo de: {filename}...")
+        log(f"[FlowEditor] Realizando upload nativo de: {filename}...")
         with self.page.expect_file_chooser(timeout=8000) as fc_info:
             enviar_btn.click()
         file_chooser = fc_info.value
@@ -102,7 +103,7 @@ class FlowEditor:
                 return text.includes('Enviando') || text.includes('Carregando') || document.querySelector('[role="progressbar"]') !== null;
             }""")
             if not uploading:
-                print(f"[FlowEditor] Upload concluído e processado com sucesso: {filename}")
+                log(f"[FlowEditor] Upload concluído e processado com sucesso: {filename}")
                 break
             time.sleep(1)
             
@@ -169,7 +170,7 @@ class FlowEditor:
             time.sleep(0.3)
 
         active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
-        print(f"[FlowEditor] {len(active_chips)} chip(s) de referência anexado(s) com sucesso!")
+        log(f"[FlowEditor] {len(active_chips)} chip(s) de referência anexado(s) com sucesso!")
 
     def attach_reference(self, reference: str):
         """Anexa uma única referência visual (retrocompatibilidade)."""
@@ -207,7 +208,7 @@ class FlowEditor:
         
         submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button:has-text('arrow_forward')").first
         submit_btn.click()
-        print("[FlowEditor] Prompt enviado com sucesso!")
+        log("[FlowEditor] Prompt enviado com sucesso!")
 
     def check_error_alerts(self) -> Optional[str]:
         """Verifica se há alertas de erro, bloqueio de segurança ou limite de cota no DOM."""
@@ -230,7 +231,7 @@ class FlowEditor:
         while time.time() - start_time < timeout:
             err = self.check_error_alerts()
             if err:
-                print(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
+                log(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
                 raise RuntimeError(f"Google Flow Error: {err}")
 
             state = self.page.evaluate("""() => {
@@ -239,14 +240,14 @@ class FlowEditor:
                 return { isGenerating: isGenerating };
             }""")
             if not state['isGenerating']:
-                print("[FlowEditor] Renderização concluída com sucesso!")
+                log("[FlowEditor] Renderização concluída com sucesso!")
                 time.sleep(2)
                 return True
             time.sleep(2)
             elapsed = int(time.time() - start_time)
-            print(f"[FlowEditor] Gerando... ({elapsed}s)")
+            log(f"[FlowEditor] Gerando... ({elapsed}s)")
             
-        print("[FlowEditor] Tempo limite esgotado para geração.")
+        log("[FlowEditor] Tempo limite esgotado para geração.")
         return False
 
     def set_video_settings(self, duration: int = 4, resolution: str = "720p", aspect_ratio: str = "16:9"):
@@ -311,7 +312,7 @@ class FlowEditor:
             
         self.page.keyboard.press("Escape")
         time.sleep(0.5)
-        print(f"[FlowEditor] Configurações de vídeo ativadas: Omni 1.1 Flash | {duration}s | {resolution} | {aspect_ratio}")
+        log(f"[FlowEditor] Configurações de vídeo ativadas: Omni 1.1 Flash | {duration}s | {resolution} | {aspect_ratio}")
 
     def submit_video_prompt(self, prompt: str, duration: Optional[int] = None, resolution: str = "720p", aspect_ratio: str = "16:9", reference: Optional[Union[str, List[str]]] = None):
         """Dispara geração de vídeo (T2V ou I2V) exigindo obrigatoriamente a duração em segundos (4s, 6s, 8s, 10s)."""
@@ -350,11 +351,11 @@ class FlowEditor:
 
         submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button:has-text('arrow_forward')").first
         submit_btn.click(force=True)
-        print(f"[FlowEditor] Prompt de vídeo enviado com sucesso ({duration}s - Omni 1.1 Flash)!")
+        log(f"[FlowEditor] Prompt de vídeo enviado com sucesso ({duration}s - Omni 1.1 Flash)!")
 
     def wait_for_video_generation(self, timeout: int = 180) -> bool:
         """Aguarda reativamente o término da renderização de vídeo com monitoramento ativo de erros e políticas."""
-        print("[FlowEditor] Aguardando início da renderização do vídeo...")
+        log("[FlowEditor] Aguardando início da renderização do vídeo...")
         start_time = time.time()
 
         # 1. Aguarda início efetivo da renderização (até 15s)
@@ -375,12 +376,12 @@ class FlowEditor:
                 break
             time.sleep(1)
 
-        print("[FlowEditor] Renderização em andamento. Monitorando conclusão...")
+        log("[FlowEditor] Renderização em andamento. Monitorando conclusão...")
         # 2. Loop de monitoramento até conclusão efetiva
         while time.time() - start_time < timeout:
             err = self.check_error_alerts()
             if err:
-                print(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
+                log(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
                 raise RuntimeError(f"Google Flow Error: {err}")
 
             state = self.page.evaluate("""() => {
@@ -393,16 +394,16 @@ class FlowEditor:
 
             if not state['isGenerating'] and state['firstTileReady']:
                 elapsed = int(time.time() - start_time)
-                print(f"[FlowEditor] Renderização de vídeo concluída com sucesso em {elapsed}s!")
-                print("[FlowEditor] Aguardando estabilização do arquivo MP4 no CDN do Google (15s)...")
+                log(f"[FlowEditor] Renderização de vídeo concluída com sucesso em {elapsed}s!")
+                log("[FlowEditor] Aguardando estabilização do arquivo MP4 no CDN do Google (15s)...")
                 time.sleep(15)
                 return True
 
             time.sleep(3)
             elapsed = int(time.time() - start_time)
-            print(f"[FlowEditor] Renderizando vídeo... ({elapsed}s)")
+            log(f"[FlowEditor] Renderizando vídeo... ({elapsed}s)")
 
-        print("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")
+        log("[FlowEditor] Tempo limite esgotado para renderização de vídeo.")
         return False
 
     def submit_batch_concurrent(
@@ -445,7 +446,7 @@ class FlowEditor:
             if not slide_refs:
                 slide_refs = base_refs
 
-            print(f"[FlowEditor] Disparando Slide {slide_id}/{len(prompts)}...")
+            log(f"[FlowEditor] Disparando Slide {slide_id}/{len(prompts)}...")
 
             # 1. Garante que os chips de referência estejam anexados (Flow limpa a cada envio)
             if slide_refs:
@@ -480,19 +481,19 @@ class FlowEditor:
 
             # 4. Clica no botão de iniciar geração
             submit_btn.click(force=True)
-            print(f"[FlowEditor] Slide {slide_id} enviado com sucesso! Aguardando {delay_between}s para o próximo...")
+            log(f"[FlowEditor] Slide {slide_id} enviado com sucesso! Aguardando {delay_between}s para o próximo...")
             submitted.append({"slide": slide_id, "prompt": p_text})
 
             # Intervalo entre envios (padrão 3s)
             if i < len(prompts) - 1:
                 time.sleep(delay_between)
 
-        print(f"[FlowEditor] Todos os {len(submitted)} slides foram disparados com sucesso para renderização concorrente!")
+        log(f"[FlowEditor] Todos os {len(submitted)} slides foram disparados com sucesso para renderização concorrente!")
         return submitted
 
     def wait_for_batch_completion(self, expected_count: int, timeout: int = 180) -> bool:
         """Aguarda todos os cards do lote atingirem 100% / finalizarem de forma concorrente."""
-        print(f"[FlowEditor] Aguardando renderização concorrente de {expected_count} cards...")
+        log(f"[FlowEditor] Aguardando renderização concorrente de {expected_count} cards...")
         time.sleep(6)
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -502,13 +503,13 @@ class FlowEditor:
             }""")
             if not is_generating:
                 elapsed = int(time.time() - start_time) + 6
-                print(f"[FlowEditor] Renderização de todos os {expected_count} cards concluída com sucesso em {elapsed}s!")
+                log(f"[FlowEditor] Renderização de todos os {expected_count} cards concluída com sucesso em {elapsed}s!")
                 time.sleep(2)
                 return True
             time.sleep(2.5)
             elapsed = int(time.time() - start_time) + 6
-            print(f"[FlowEditor] Renderizando lote concorrente... ({elapsed}s)")
+            log(f"[FlowEditor] Renderizando lote concorrente... ({elapsed}s)")
 
-        print("[FlowEditor] Tempo limite esgotado para renderização do lote.")
+        log("[FlowEditor] Tempo limite esgotado para renderização do lote.")
         return False
 

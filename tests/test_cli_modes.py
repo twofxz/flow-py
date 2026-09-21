@@ -19,3 +19,31 @@ def test_video_parser_head_flag():
 
     args_vid_head = parser.parse_args(["video", "--prompt", "test", "--duration", "4", "--head"])
     assert args_vid_head.head is True
+
+def test_download_all_count_and_json_flags():
+    parser = build_parser()
+    args = parser.parse_args(["download-all", "--count", "5", "--json"])
+    assert args.command == "download-all"
+    assert args.count == 5
+    assert args.json is True
+
+def test_all_subcommands_support_json_flag():
+    parser = build_parser()
+    
+    args_gen = parser.parse_args(["generate", "--prompt", "test", "--json"])
+    assert args_gen.json is True
+
+    args_vid = parser.parse_args(["video", "--prompt", "test", "--duration", "4", "--json"])
+    assert args_vid.json is True
+
+    args_batch = parser.parse_args(["batch", "--manifest", "manifest.json", "--json"])
+    assert args_batch.json is True
+
+def test_logger_writes_to_stderr_not_stdout(capsys):
+    from flow_api.logger import log
+    import sys
+    log("This is an internal status message")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "This is an internal status message" in captured.err
+
