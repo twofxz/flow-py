@@ -1,4 +1,4 @@
-# 🎨 Google Flow API (`google-flow-api`)
+# 🎨 flow-py: Google Flow for AI Agents (`google-flow-api`)
 
 > **The Unofficial Multi-Agent Automation Engine, CLI, MCP Server & Universal Skill for Google Flow.**  
 > Offload production-grade image generation (Nano Banana 2, Nano Banana Pro, Imagen 3) and cinematic video generation (Gemini Omni Flash 1.1) to Google Flow directly from any AI Agent — with zero token waste and native original quality.
@@ -50,8 +50,8 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/gabriel-siqueira/google-flow-api.git
-cd google-flow-api
+git clone https://github.com/twofxz/flow-py.git
+cd flow-py
 
 # Install dependencies and dev tools
 uv sync --extra dev

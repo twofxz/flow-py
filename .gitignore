@@ -48,3 +48,5 @@ flow_outputs/
 /get_*.py
 /inspect_*.py
 /generate_*.py
+/debug_*.py
+docs/

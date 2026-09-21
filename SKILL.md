@@ -15,8 +15,8 @@ Requires Python 3.10+ and Google Chrome installed locally.
 
 ```bash
 # Clone and install dependencies
-git clone https://github.com/gabriel-siqueira/google-flow-api.git
-cd google-flow-api
+git clone https://github.com/twofxz/flow-py.git
+cd flow-py
 uv sync --extra dev
 ```
 
