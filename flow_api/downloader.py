@@ -57,8 +57,11 @@ class FlowDownloader:
 
         # 1. Clica no botão 'Baixar mídia' se o menu não estiver aberto
         menu_open = self.page.evaluate("""() => {
-            const btn = document.querySelector("button[aria-label*='Baixar'], button:has-text('Baixar')");
-            return btn && btn.getAttribute('aria-expanded') === 'true';
+            const btn = Array.from(document.querySelectorAll('button')).find(b => 
+                (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Baixar')) ||
+                (b.innerText && b.innerText.includes('Baixar'))
+            );
+            return btn ? btn.getAttribute('aria-expanded') === 'true' : false;
         }""")
 
         if not menu_open:
