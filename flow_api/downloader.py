@@ -13,8 +13,30 @@ class FlowDownloader:
         self.page = page
         self.download_dir = download_dir
 
-    def open_viewer(self, force_newest: bool = False):
-        """Garante que o visualizador detalhado esteja aberto (seja na rota /edit/ ou via card do canvas)."""
+    def open_viewer(self, force_newest: bool = False, image_src: Optional[str] = None):
+        """Open the viewer on the image from this generation, not whichever tile is already open."""
+        if image_src:
+            self.page.keyboard.press("Escape")
+            time.sleep(0.3)
+            clicked = self.page.evaluate("""(src) => {
+                const wanted = src.split('?')[0];
+                const tiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
+                const tile = tiles.find(node => {
+                    const img = node.querySelector('img');
+                    return img && img.src && img.src.split('?')[0] === wanted;
+                });
+                if (!tile) return false;
+                tile.click();
+                return true;
+            }""", image_src)
+            if not clicked:
+                log("[FlowDownloader] Quadro novo não encontrado no canvas para abrir o viewer.")
+            try:
+                self.page.wait_for_url("**/edit/**", timeout=8000)
+            except Exception:
+                pass
+            return
+
         if "/edit/" in self.page.url:
             return
 
@@ -34,7 +56,7 @@ class FlowDownloader:
 
         # Aguarda botão de download estar visível
         try:
-            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar')").first
+            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar'), button[aria-label*='Download'], button:has-text('Download')").first
             dl_btn.wait_for(state="visible", timeout=8000)
         except Exception:
             pass
@@ -46,34 +68,35 @@ class FlowDownloader:
         targets = []
         for btn in buttons:
             aria = btn.get_attribute("aria-label") or ""
-            if aria and not any(nav in aria.lower() for nav in ["anterior", "próxima", "proxima"]):
+            if aria and not any(nav in aria.lower() for nav in ["anterior", "próxima", "proxima", "previous", "next"]):
                 targets.append({"element": btn, "aria": aria})
         return targets
 
-    def download_current(self, resolution: str = "1K", filename: Optional[str] = None, timeout: int = 25) -> Optional[str]:
+    def download_current(self, resolution: str = "1K", filename: Optional[str] = None, timeout: int = 25, image_src: Optional[str] = None) -> Optional[str]:
         """Baixa a mídia ativa na tela na resolução nativa especificada com fallback inteligente."""
-        default_downloads = os.path.expanduser(r"~\Downloads")
+        default_downloads = os.path.expanduser("~/Downloads")
         before_custom = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
         before_default = set(os.listdir(default_downloads)) if os.path.exists(default_downloads) else set()
 
         # 1. Clica no botão 'Baixar mídia' se o menu não estiver aberto
         menu_open = self.page.evaluate("""() => {
             const btn = Array.from(document.querySelectorAll('button')).find(b => 
-                (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Baixar')) ||
-                (b.innerText && b.innerText.includes('Baixar'))
+                (b.getAttribute('aria-label') && (b.getAttribute('aria-label').includes('Baixar') || b.getAttribute('aria-label').includes('Download'))) ||
+                (b.innerText && (b.innerText.includes('Baixar') || b.innerText.includes('Download')))
             );
             return btn ? btn.getAttribute('aria-expanded') === 'true' : false;
         }""")
 
         if not menu_open:
-            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar')").first
+            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar'), button[aria-label*='Download'], button:has-text('Download')").first
             try:
                 if dl_btn.is_visible():
                     dl_btn.click(force=True)
                 else:
                     self.page.evaluate("""() => {
                         const btn = Array.from(document.querySelectorAll('button')).find(b => 
-                            b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
+                            b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar') ||
+                            b.innerText.includes('Download') || b.getAttribute('aria-label')?.includes('Download')
                         );
                         if (btn) btn.click();
                     }""")
@@ -89,11 +112,12 @@ class FlowDownloader:
             item_btn = self.page.locator(".cdk-overlay-container button, .cdk-overlay-container [role='menuitem']").filter(has_text="Original").first
 
         # 3. Tenta download com expect_download nativo do Playwright
+        timeout_ms = 40000 if resolution == "2K" else 8000
         download_obj = None
         try:
-            with self.page.expect_download(timeout=5000) as dl_info:
+            with self.page.expect_download(timeout=timeout_ms) as dl_info:
                 if item_btn.is_visible():
-                    item_btn.click()
+                    item_btn.click(force=True)
                 else:
                     self.page.evaluate("""(res) => {
                         const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button'));
@@ -130,7 +154,8 @@ class FlowDownloader:
                 pass
 
         # 4. Monitora diretamente a pasta de download (caso Page.setDownloadBehavior tenha salvo no disco)
-        for _ in range(timeout):
+        timeout_loop = 45 if resolution == "2K" else timeout
+        for _ in range(timeout_loop):
             time.sleep(1)
             if os.path.exists(self.download_dir):
                 after_custom = set(os.listdir(self.download_dir))
@@ -181,25 +206,21 @@ class FlowDownloader:
                     self.page.keyboard.press("Escape")
                     return dest
 
-        # 5. Fallback final: extrai imagem em alta resolução diretamente do DOM via requisição autenticada
+        # 5. Fallback: só a imagem desta geração. O primeiro tile do canvas é um quadro antigo.
         try:
-            img_src = self.page.evaluate("""() => {
-                // 1. Tenta visualizador detalhado se aberto
+            img_src = self.page.evaluate("""(wanted) => {
+                const matches = (src) => src && !src.startsWith('data:') && (!wanted || src.split('?')[0] === wanted.split('?')[0]);
+                if (wanted) {
+                    const tiles = Array.from(document.querySelectorAll('flow-grid-tile-container img'));
+                    const img = tiles.find(node => matches(node.src));
+                    return img ? img.src : wanted;
+                }
                 const viewerImg = document.querySelector('.main-view img, .media-viewer img, .asset-detail-viewer img');
-                if (viewerImg && viewerImg.src && !viewerImg.src.startsWith('data:') && !viewerImg.closest('.chip-container')) {
+                if (viewerImg && matches(viewerImg.src) && !viewerImg.closest('.chip-container')) {
                     return viewerImg.src;
                 }
-
-                // 2. Busca no card gerado mais recente do canvas (ignora estritamente chips da barra de comando e sidebar)
-                const canvasTiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
-                for (const tile of canvasTiles) {
-                    const img = tile.querySelector('img');
-                    if (img && img.src && !img.src.startsWith('data:') && !img.closest('.chip-container, .prompt-box, .sidebar')) {
-                        return img.src;
-                    }
-                }
                 return null;
-            }""")
+            }""", image_src)
             if img_src:
                 if "flow-content.google" in img_src:
                     high_res_url = img_src

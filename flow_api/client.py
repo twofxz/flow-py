@@ -130,13 +130,15 @@ class FlowClient:
 
             flags = [
                 '--remote-debugging-port=9222',
-                f'--user-data-dir="{DEFAULT_PROFILE}"',
+                f'--user-data-dir={DEFAULT_PROFILE}',
                 '--no-first-run',
                 '--no-default-browser-check',
                 '--disable-background-timer-throttling',
                 '--disable-backgrounding-occluded-windows',
                 '--disable-renderer-backgrounding',
-                '--window-size=1920,1080'
+                '--window-size=1920,1080',
+                '--lang=pt-BR',
+                '--accept-lang=pt-BR,pt,en',
             ]
             if self.headless:
                 flags.extend([
@@ -301,7 +303,7 @@ class FlowClient:
 
         # Se estiver na página inicial do Flow e não em um projeto, clica em Novo Projeto
         if "flow.google.com/project" not in self.page.url:
-            new_btn = self.page.locator("button:has-text('Novo projeto'), [aria-label*='Novo projeto']").first
+            new_btn = self.page.locator("button:has-text('Novo projeto'), [aria-label*='Novo projeto'], button:has-text('New project'), [aria-label*='New project']").first
             if new_btn.is_visible():
                 log(f"[FlowClient] Abrindo novo projeto no Flow para '{self.session}'...")
                 new_btn.click()
@@ -320,9 +322,25 @@ class FlowClient:
         if not self.page:
             return
         time.sleep(0.5)
-        comecar_btn = self.page.locator("button:has-text('Começar'), button:has-text('Entendi')").first
+        try:
+            cookie_btn = self.page.locator("#glue-cookie-notification-bar-1 button, .glue-cookie-notification-bar button, button:has-text('Hide'), button:has-text('Accept all'), button:has-text('Aceitar tudo')").first
+            if cookie_btn.is_visible():
+                cookie_btn.click(force=True)
+                time.sleep(0.5)
+        except Exception:
+            pass
+
+        try:
+            agree_btn = self.page.locator("button:has-text('I agree'), button:has-text('Concordo')").first
+            if agree_btn.is_visible():
+                agree_btn.click(force=True)
+                time.sleep(0.5)
+        except Exception:
+            pass
+
+        comecar_btn = self.page.locator("button:has-text('Começar'), button:has-text('Entendi'), button:has-text('Got it'), button:has-text('Start Creating'), button:has-text('Start')").first
         if comecar_btn.is_visible():
-            comecar_btn.click()
+            comecar_btn.click(force=True)
             time.sleep(1)
         else:
             self.page.keyboard.press("Escape")
@@ -331,7 +349,7 @@ class FlowClient:
         """Garante que a visualização esteja no canvas principal fechando o visualizador se aberto."""
         if not self.page:
             return
-        done_btn = self.page.locator("button[aria-label='Edição concluída'], button:has-text('check'), button:has-text('Concluir')").first
+        done_btn = self.page.locator("button[aria-label='Edição concluída'], button:has-text('check'), button:has-text('Concluir'), button[aria-label*='Done'], button:has-text('Done')").first
         if done_btn.is_visible():
             done_btn.click()
             time.sleep(1.5)
@@ -359,7 +377,7 @@ class FlowClient:
                 return {"authenticated": False, "status": "disconnected", "error": "Página não conectada"}
             
             url = self.page.url
-            if "accounts.google.com" in url or "signin" in url:
+            if "accounts.google.com" in url or "signin" in url or "/about" in url:
                 return {
                     "authenticated": False,
                     "status": "auth_required",
@@ -368,8 +386,8 @@ class FlowClient:
                 }
             
             needs_login = self.page.evaluate("""() => {
-                const text = document.body.innerText;
-                return text.includes('Fazer login') || text.includes('Sign in');
+                const text = (document.body && document.body.innerText) || '';
+                return text.includes('Fazer login') || text.includes('Sign in') || text.includes('Увійти') || text.includes('Войти') || text.includes('Log in') || window.location.href.includes('/about');
             }""")
             if needs_login:
                 return {

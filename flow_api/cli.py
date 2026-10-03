@@ -246,13 +246,25 @@ def main():
             client.ensure_canvas()
             ref = args.references or args.reference or args.reference_image
             editor.submit_prompt(args.prompt, model=args.model, aspect_ratio=args.ratio, reference=ref)
-            success = editor.wait_for_generation(timeout=args.timeout)
-            if not success:
-                print(json.dumps({"success": False, "error": "Timeout na renderização"}))
+            try:
+                success = editor.wait_for_generation(timeout=args.timeout)
+            except RuntimeError as err:
+                print(json.dumps({"success": False, "error": str(err)}))
+                sys.exit(1)
+            if not success or not editor._new_image_srcs:
+                print(json.dumps({"success": False, "error": "Timeout na renderização: nenhum quadro novo apareceu"}))
                 sys.exit(1)
 
-            downloader.open_viewer()
-            saved_file = downloader.download_current(resolution=args.resolution, filename=args.filename)
+            fresh_src = editor._new_image_srcs[0]
+            downloader.open_viewer(image_src=fresh_src)
+            saved_file = downloader.download_current(
+                resolution=args.resolution,
+                filename=args.filename,
+                image_src=fresh_src,
+            )
+            if not saved_file:
+                print(json.dumps({"success": False, "error": "Quadro novo apareceu, mas o download falhou"}))
+                sys.exit(1)
             abs_saved_file = os.path.abspath(saved_file) if saved_file else None
             abs_output_dir = os.path.abspath(client.download_dir) if client.download_dir else None
             print(json.dumps({
